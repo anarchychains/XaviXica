@@ -1,5 +1,5 @@
 import AppShell from "./components/AppShell";
-import CryptoContentAgent from "./CryptoContentAgent";
+import CryptoContentAgent from "./CryptoContentAgent.jsx";
 
 export default function App() {
   return (
