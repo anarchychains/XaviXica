@@ -6,8 +6,51 @@ const DEFAULT_STATE = {
   platform: "instagram",
   format: "feed",
   characteristic: "educational",
-  sources: [],
+  sources: [], // agora é array de objetos: [{ type, value }]
 };
+
+function detectSourceType(value) {
+  const v = (value || "").trim();
+  if (!v) return "text";
+
+  // detecta link bem simples (sem frescura)
+  const looksLikeUrl =
+    /^https?:\/\/\S+/i.test(v) || /^www\.\S+/i.test(v) || /\.\w{2,}\/\S*/.test(v);
+
+  return looksLikeUrl ? "link" : "text";
+}
+
+function normalizeSources(rawSources) {
+  if (!Array.isArray(rawSources)) return [];
+
+  // Migração: se vier ["https://..."] vira [{type:"link", value:"https://..."}]
+  return rawSources
+    .map((item) => {
+      if (!item) return null;
+
+      // já é o formato novo
+      if (typeof item === "object" && item.value) {
+        return {
+          type: item.type || detectSourceType(item.value),
+          value: String(item.value).trim(),
+        };
+      }
+
+      // formato antigo (string)
+      if (typeof item === "string") {
+        const value = item.trim();
+        if (!value) return null;
+
+        return {
+          type: detectSourceType(value),
+          value,
+        };
+      }
+
+      return null;
+    })
+    .filter(Boolean);
+}
 
 export function useCreateContent() {
   const [state, setState] = useState(DEFAULT_STATE);
@@ -26,12 +69,16 @@ export function useCreateContent() {
         if (res?.value) {
           try {
             const parsed = JSON.parse(res.value);
-            setState({
+
+            const next = {
               ...DEFAULT_STATE,
               ...parsed,
-              // garante array mesmo se vier zoado
-              sources: Array.isArray(parsed?.sources) ? parsed.sources : [],
-            });
+            };
+
+            // migração sources
+            next.sources = normalizeSources(parsed?.sources);
+
+            setState(next);
           } catch {
             setState(DEFAULT_STATE);
           }
@@ -48,7 +95,7 @@ export function useCreateContent() {
     };
   }, []);
 
-  // Salvar com debounce
+  // Salvar com debounce (evita salvar a cada tecla e perder foco)
   useEffect(() => {
     if (!hydrated) return;
 
@@ -66,25 +113,37 @@ export function useCreateContent() {
   const setTopic = (topic) => setState((s) => ({ ...s, topic }));
   const setPlatform = (platform) => setState((s) => ({ ...s, platform }));
   const setFormat = (format) => setState((s) => ({ ...s, format }));
-  const setCharacteristic = (characteristic) => setState((s) => ({ ...s, characteristic }));
+  const setCharacteristic = (characteristic) =>
+    setState((s) => ({ ...s, characteristic }));
 
-  const addSource = (value) => {
-    const v = (value || "").trim();
-    if (!v) return;
+  const addSource = (rawValue) => {
+    const value = String(rawValue || "").trim();
+    if (!value) return;
+
+    const type = detectSourceType(value);
 
     setState((s) => {
-      const sources = Array.isArray(s.sources) ? s.sources : [];
-      // evita duplicados exatos (simples e eficiente)
-      if (sources.includes(v)) return s;
-      return { ...s, sources: [...sources, v] };
+      const sources = normalizeSources(s.sources);
+
+      // evita duplicado exato
+      const exists = sources.some((x) => x.value === value);
+      if (exists) return s;
+
+      return {
+        ...s,
+        sources: [...sources, { type, value }],
+      };
     });
   };
 
   const removeSource = (index) => {
     setState((s) => {
-      const sources = Array.isArray(s.sources) ? s.sources : [];
+      const sources = normalizeSources(s.sources);
       if (index < 0 || index >= sources.length) return s;
-      return { ...s, sources: sources.filter((_, i) => i !== index) };
+      return {
+        ...s,
+        sources: sources.filter((_, i) => i !== index),
+      };
     });
   };
 
