@@ -44,6 +44,7 @@ export function AppShell({
   statusText,
   state,
   onChangeTopic,
+  onChangeAudience, // NOVO ✅
   onChangePlatform,
   onChangeFormat,
   onChangeCharacteristic,
@@ -56,12 +57,13 @@ export function AppShell({
   const format = state?.format || "feed";
   const characteristic = state?.characteristic || "educational";
   const sources = Array.isArray(state?.sources) ? state.sources : [];
+  const audience = state?.audience || ""; // NOVO ✅
 
   const canUseSources =
     typeof onAddSource === "function" && typeof onRemoveSource === "function";
 
   const [sourceInput, setSourceInput] = useState("");
-  const [sourceHint, setSourceHint] = useState(""); // microfeedback sem modal/alert
+  const [sourceHint, setSourceHint] = useState("");
 
   const sourcesCountText = useMemo(() => {
     const n = sources.length || 0;
@@ -154,6 +156,28 @@ export function AppShell({
           </div>
         </div>
 
+        {/* PÚBLICO-ALVO ✅ */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 13, color: "#444", marginBottom: 6 }}>
+            Pra quem é esse conteúdo? (público-alvo)
+          </div>
+          <input
+            value={audience}
+            onChange={(e) => onChangeAudience?.(e.target.value)}
+            placeholder="Ex: iniciantes em cripto / founders SaaS / designers / mães de primeira viagem…"
+            style={{
+              width: "100%",
+              padding: 12,
+              borderRadius: 10,
+              border: "1px solid #ddd",
+              outline: "none",
+            }}
+          />
+          <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+            Dica: descreve o <b>nível</b> e o <b>contexto</b> (ex: “iniciante total”, “avançado”, “já vende online”).
+          </div>
+        </div>
+
         {/* QUAL A BASE (FONTES) */}
         <div style={{ marginTop: 10, marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: "#444", marginBottom: 6 }}>
@@ -181,7 +205,6 @@ export function AppShell({
               }}
             />
 
-            {/* botão sempre clicável: se vazio, dá microfeedback */}
             <button
               type="button"
               onClick={() => tryAddSource(sourceInput)}
