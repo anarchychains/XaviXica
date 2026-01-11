@@ -3,17 +3,17 @@ import { storage } from "../lib/storage";
 
 const DEFAULT_STATE = {
   topic: "",
+  audience: "", // NOVO ✅
   platform: "instagram",
   format: "feed",
   characteristic: "educational",
-  sources: [], // agora é array de objetos: [{ type, value }]
+  sources: [], // [{ type, value }]
 };
 
 function detectSourceType(value) {
   const v = (value || "").trim();
   if (!v) return "text";
 
-  // detecta link bem simples (sem frescura)
   const looksLikeUrl =
     /^https?:\/\/\S+/i.test(v) || /^www\.\S+/i.test(v) || /\.\w{2,}\/\S*/.test(v);
 
@@ -23,12 +23,10 @@ function detectSourceType(value) {
 function normalizeSources(rawSources) {
   if (!Array.isArray(rawSources)) return [];
 
-  // Migração: se vier ["https://..."] vira [{type:"link", value:"https://..."}]
   return rawSources
     .map((item) => {
       if (!item) return null;
 
-      // já é o formato novo
       if (typeof item === "object" && item.value) {
         return {
           type: item.type || detectSourceType(item.value),
@@ -36,7 +34,6 @@ function normalizeSources(rawSources) {
         };
       }
 
-      // formato antigo (string)
       if (typeof item === "string") {
         const value = item.trim();
         if (!value) return null;
@@ -57,7 +54,6 @@ export function useCreateContent() {
   const [hydrated, setHydrated] = useState(false);
   const saveTimerRef = useRef(null);
 
-  // Carregar do storage quando abre o app
   useEffect(() => {
     let alive = true;
 
@@ -75,8 +71,10 @@ export function useCreateContent() {
               ...parsed,
             };
 
-            // migração sources
             next.sources = normalizeSources(parsed?.sources);
+
+            // audiência pode ter vindo vazia ou inexistente, ok
+            next.audience = typeof parsed?.audience === "string" ? parsed.audience : "";
 
             setState(next);
           } catch {
@@ -95,7 +93,6 @@ export function useCreateContent() {
     };
   }, []);
 
-  // Salvar com debounce (evita salvar a cada tecla e perder foco)
   useEffect(() => {
     if (!hydrated) return;
 
@@ -111,10 +108,10 @@ export function useCreateContent() {
   }, [state, hydrated]);
 
   const setTopic = (topic) => setState((s) => ({ ...s, topic }));
+  const setAudience = (audience) => setState((s) => ({ ...s, audience })); // NOVO ✅
   const setPlatform = (platform) => setState((s) => ({ ...s, platform }));
   const setFormat = (format) => setState((s) => ({ ...s, format }));
-  const setCharacteristic = (characteristic) =>
-    setState((s) => ({ ...s, characteristic }));
+  const setCharacteristic = (characteristic) => setState((s) => ({ ...s, characteristic }));
 
   const addSource = (rawValue) => {
     const value = String(rawValue || "").trim();
@@ -124,8 +121,6 @@ export function useCreateContent() {
 
     setState((s) => {
       const sources = normalizeSources(s.sources);
-
-      // evita duplicado exato
       const exists = sources.some((x) => x.value === value);
       if (exists) return s;
 
@@ -153,6 +148,7 @@ export function useCreateContent() {
     state,
     hydrated,
     setTopic,
+    setAudience, // NOVO ✅
     setPlatform,
     setFormat,
     setCharacteristic,
