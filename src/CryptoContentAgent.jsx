@@ -177,23 +177,23 @@ export default function CryptoContentAgent() {
         </div>
 
         {generated && (
-          <div className="bg-white rounded-lg shadow-lg overflow-hidden">
-            {/* HEADER STICKY */}
-            <div className="sticky top-0 bg-white border-b p-4 flex justify-between items-center z-10">
-              <div>
-                <strong>Conteúdo gerado</strong>
-              </div>
-              <CopyButton text={copyPayload} />
-            </div>
-
-            {/* BODY */}
-            <div className="p-6 space-y-4 max-h-[520px] overflow-auto">
-              <h2 className="font-bold">{generated.title}</h2>
-              <pre className="whitespace-pre-wrap">{generated.copy}</pre>
-            </div>
-          </div>
-        )}
+  <div className="bg-white rounded-lg shadow-lg overflow-hidden relative">
+    {/* COPY BAR FIXA (ESSÊNCIA DO PRODUTO) */}
+    <div className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b px-4 py-3 flex items-center justify-between">
+      <div className="font-semibold text-sm text-gray-800">
+        Conteúdo gerado
       </div>
+      <CopyButton text={copyPayload} />
     </div>
-  );
-}
+
+    {/* SCROLL DO CONTEÚDO */}
+    <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+      <h2 className="font-bold text-lg">{generated.title}</h2>
+
+      <pre className="whitespace-pre-wrap text-sm leading-relaxed">
+        {generated.copy}
+      </pre>
+    </div>
+  </div>
+)}
+
