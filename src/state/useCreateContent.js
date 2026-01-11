@@ -12,7 +12,6 @@ const DEFAULT_STATE = {
 export function useCreateContent() {
   const [state, setState] = useState(DEFAULT_STATE);
   const [hydrated, setHydrated] = useState(false);
-
   const saveTimerRef = useRef(null);
 
   // Carregar do storage quando abre o app
@@ -27,16 +26,11 @@ export function useCreateContent() {
         if (res?.value) {
           try {
             const parsed = JSON.parse(res.value);
-
             setState({
               ...DEFAULT_STATE,
               ...parsed,
-              // garante tipos estáveis
+              // garante array mesmo se vier zoado
               sources: Array.isArray(parsed?.sources) ? parsed.sources : [],
-              characteristic:
-                typeof parsed?.characteristic === "string"
-                  ? parsed.characteristic
-                  : DEFAULT_STATE.characteristic,
             });
           } catch {
             setState(DEFAULT_STATE);
@@ -54,7 +48,7 @@ export function useCreateContent() {
     };
   }, []);
 
-  // Salvar com debounce (evita salvar a cada tecla e perder foco)
+  // Salvar com debounce
   useEffect(() => {
     if (!hydrated) return;
 
@@ -79,18 +73,18 @@ export function useCreateContent() {
     if (!v) return;
 
     setState((s) => {
-      const current = Array.isArray(s.sources) ? s.sources : [];
-      // evita duplicar igualzinho
-      if (current.includes(v)) return s;
-      return { ...s, sources: [...current, v] };
+      const sources = Array.isArray(s.sources) ? s.sources : [];
+      // evita duplicados exatos (simples e eficiente)
+      if (sources.includes(v)) return s;
+      return { ...s, sources: [...sources, v] };
     });
   };
 
   const removeSource = (index) => {
     setState((s) => {
-      const current = Array.isArray(s.sources) ? s.sources : [];
-      if (index < 0 || index >= current.length) return s;
-      return { ...s, sources: current.filter((_, i) => i !== index) };
+      const sources = Array.isArray(s.sources) ? s.sources : [];
+      if (index < 0 || index >= sources.length) return s;
+      return { ...s, sources: sources.filter((_, i) => i !== index) };
     });
   };
 
