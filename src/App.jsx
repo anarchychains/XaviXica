@@ -4,7 +4,16 @@ import { useCreateContent } from "./state/useCreateContent";
 import { generateFakeContent } from "./generators/fakeContentGenerator";
 
 export default function App() {
-  const { state, setTopic, setPlatform, setFormat } = useCreateContent();
+  const {
+    state,
+    setTopic,
+    setPlatform,
+    setFormat,
+    setCharacteristic,
+    addSource,
+    removeSource,
+  } = useCreateContent();
+
   const [generated, setGenerated] = useState(null);
 
   const statusText = useMemo(() => {
@@ -17,6 +26,8 @@ export default function App() {
       topic: state.topic,
       platform: state.platform,
       format: state.format,
+      characteristic: state.characteristic,
+      sources: state.sources,
     });
 
     setGenerated(content);
@@ -31,6 +42,9 @@ export default function App() {
       onChangeTopic={setTopic}
       onChangePlatform={setPlatform}
       onChangeFormat={setFormat}
+      onChangeCharacteristic={setCharacteristic}
+      onAddSource={addSource}
+      onRemoveSource={removeSource}
       onGenerate={handleGenerate}
       generated={generated}
     />
