@@ -1,5 +1,14 @@
 import React, { useMemo, useState } from "react";
 
+const CHARACTERISTICS = [
+  { id: "sell", label: "Vender (direto ao ponto)", hint: "Oferta, benefício, CTA forte." },
+  { id: "reflective", label: "Reflexivo / filosófico", hint: "Humano, introspectivo, perguntas." },
+  { id: "investigative", label: "Repórter investigativo", hint: "Apuração, evidência, contraste." },
+  { id: "educational", label: "Educativo / didático", hint: "Explica sem jargão, passo a passo." },
+  { id: "controversial", label: "Polêmico (controlado)", hint: "Provoca sem ser tóxico." },
+  { id: "storytelling", label: "Storytelling", hint: "História → insight → ação." },
+];
+
 function PlatformLabel(platform) {
   if (platform === "instagram") return "Instagram";
   if (platform === "twitter") return "Twitter/X";
@@ -21,14 +30,13 @@ function FormatLabel(format) {
   return map[format] || format;
 }
 
-const CHARACTERISTICS = [
-  { id: "sell", label: "Vender (direto ao ponto)", hint: "Oferta, benefício, CTA forte." },
-  { id: "reflective", label: "Reflexivo / filosófico", hint: "Humano, introspectivo, perguntas." },
-  { id: "investigative", label: "Repórter investigativo", hint: "Apuração, evidência, contraste." },
-  { id: "educational", label: "Educativo / didático", hint: "Explica sem jargão, passo a passo." },
-  { id: "controversial", label: "Polêmico (controlado)", hint: "Provoca sem ser tóxico." },
-  { id: "storytelling", label: "Storytelling", hint: "História → insight → ação." },
-];
+function formatSourcePillLabel(src) {
+  const value = src?.value || "";
+  const type = src?.type || "text";
+  const short = value.length > 54 ? value.slice(0, 54) + "…" : value;
+  const prefix = type === "link" ? "🔗" : "📝";
+  return `${prefix} ${short}`;
+}
 
 export function AppShell({
   title,
@@ -49,9 +57,18 @@ export function AppShell({
   const characteristic = state?.characteristic || "educational";
   const sources = Array.isArray(state?.sources) ? state.sources : [];
 
-  const canUseSources = typeof onAddSource === "function" && typeof onRemoveSource === "function";
+  const canUseSources =
+    typeof onAddSource === "function" && typeof onRemoveSource === "function";
 
-  const [sourceDraft, setSourceDraft] = useState("");
+  const [sourceInput, setSourceInput] = useState("");
+  const [sourceHint, setSourceHint] = useState(""); // microfeedback sem modal/alert
+
+  const sourcesCountText = useMemo(() => {
+    const n = sources.length || 0;
+    if (n === 0) return "Nenhuma fonte adicionada ainda.";
+    if (n === 1) return "Base carregada: 1 fonte.";
+    return `Base carregada: ${n} fontes.`;
+  }, [sources.length]);
 
   const characteristicHint = useMemo(() => {
     return (CHARACTERISTICS.find((c) => c.id === characteristic) || {}).hint || "";
@@ -82,12 +99,19 @@ export function AppShell({
 
   const formats = formatsByPlatform[platform] || formatsByPlatform.instagram;
 
-  function handleAddSource() {
+  function tryAddSource(value) {
     if (!canUseSources) return;
-    const v = (sourceDraft || "").trim();
-    if (!v) return;
-    onAddSource(v);
-    setSourceDraft("");
+
+    const trimmed = (value || "").trim();
+    if (!trimmed) {
+      setSourceHint("Cole um link ou texto antes de adicionar.");
+      return;
+    }
+
+    onAddSource(trimmed);
+    setSourceInput("");
+    setSourceHint("Fonte adicionada ✅");
+    setTimeout(() => setSourceHint(""), 1200);
   }
 
   return (
@@ -125,7 +149,9 @@ export function AppShell({
               outline: "none",
             }}
           />
-          <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>{statusText}</div>
+          <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+            {statusText}
+          </div>
         </div>
 
         {/* QUAL A BASE (FONTES) */}
@@ -136,8 +162,11 @@ export function AppShell({
 
           <div style={{ display: "flex", gap: 8 }}>
             <input
-              value={sourceDraft}
-              onChange={(e) => setSourceDraft(e.target.value)}
+              value={sourceInput}
+              onChange={(e) => {
+                setSourceInput(e.target.value);
+                if (sourceHint) setSourceHint("");
+              }}
               placeholder="Cole um link (YouTube/site/thread) ou um texto-base…"
               style={{
                 flex: 1,
@@ -148,38 +177,46 @@ export function AppShell({
               }}
               onKeyDown={(e) => {
                 if (e.key !== "Enter") return;
-                e.preventDefault();
-                handleAddSource();
+                tryAddSource(sourceInput);
               }}
             />
 
+            {/* botão sempre clicável: se vazio, dá microfeedback */}
             <button
               type="button"
-              disabled={!canUseSources || !sourceDraft.trim()}
-              onClick={handleAddSource}
+              onClick={() => tryAddSource(sourceInput)}
               style={{
                 padding: "12px 14px",
                 borderRadius: 10,
                 border: "1px solid #e5e5e5",
-                background: !canUseSources || !sourceDraft.trim() ? "#f6f6f6" : "#fff",
-                cursor: !canUseSources || !sourceDraft.trim() ? "not-allowed" : "pointer",
+                background: "#fff",
+                cursor: "pointer",
                 fontWeight: 800,
-                opacity: !canUseSources || !sourceDraft.trim() ? 0.65 : 1,
               }}
+              title="Adicionar fonte"
             >
               + Add
             </button>
           </div>
 
           <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
-            Dica: aperta <b>Enter</b> pra adicionar rápido.
+            {sourcesCountText}{" "}
+            <span style={{ color: "#777" }}>
+              (Dica: aperta <b>Enter</b> pra adicionar rápido.)
+            </span>
           </div>
 
-          {sources.length ? (
+          {sourceHint ? (
+            <div style={{ marginTop: 6, fontSize: 12, color: "#2563eb", fontWeight: 700 }}>
+              {sourceHint}
+            </div>
+          ) : null}
+
+          {sources?.length ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
               {sources.map((s, idx) => (
                 <span
-                  key={`${s}-${idx}`}
+                  key={`${s?.value || "src"}-${idx}`}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -189,14 +226,10 @@ export function AppShell({
                     borderRadius: 999,
                     background: "rgba(16,185,129,0.10)",
                     border: "1px solid rgba(16,185,129,0.25)",
-                    maxWidth: 520,
                   }}
-                  title={s}
+                  title={s?.value}
                 >
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {s}
-                  </span>
-
+                  {formatSourcePillLabel(s)}
                   {canUseSources ? (
                     <button
                       type="button"
@@ -246,7 +279,9 @@ export function AppShell({
             ))}
           </select>
 
-          <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>{characteristicHint}</div>
+          <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+            {characteristicHint}
+          </div>
         </div>
 
         {/* PLATAFORMA + FORMATO */}
@@ -317,6 +352,7 @@ export function AppShell({
         </button>
       </div>
 
+      {/* GRID FINAL */}
       <div
         style={{
           display: "grid",
@@ -415,7 +451,8 @@ export function AppShell({
                 <div>
                   <div style={{ fontSize: 12, color: "#666" }}>Métricas esperadas</div>
                   <div style={{ fontWeight: 700 }}>
-                    Eng.: {generated.expectedMetrics?.engagement} • Alc.: {generated.expectedMetrics?.reach}
+                    Eng.: {generated.expectedMetrics?.engagement} • Alc.:{" "}
+                    {generated.expectedMetrics?.reach}
                   </div>
                 </div>
               </div>
