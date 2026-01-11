@@ -47,12 +47,15 @@ export function AppShell({
   const platform = state?.platform || "instagram";
   const format = state?.format || "feed";
   const characteristic = state?.characteristic || "educational";
-  const sources = state?.sources || [];
+  const sources = Array.isArray(state?.sources) ? state.sources : [];
 
   const canUseSources = typeof onAddSource === "function" && typeof onRemoveSource === "function";
 
-  // Input controlado só pra "Fontes"
-  const [sourceInput, setSourceInput] = useState("");
+  const [sourceDraft, setSourceDraft] = useState("");
+
+  const characteristicHint = useMemo(() => {
+    return (CHARACTERISTICS.find((c) => c.id === characteristic) || {}).hint || "";
+  }, [characteristic]);
 
   const formatsByPlatform = {
     instagram: [
@@ -79,25 +82,12 @@ export function AppShell({
 
   const formats = formatsByPlatform[platform] || formatsByPlatform.instagram;
 
-  const characteristicHint = useMemo(() => {
-    return (CHARACTERISTICS.find((c) => c.id === characteristic) || {}).hint || "";
-  }, [characteristic]);
-
-  function normalizeSource(raw) {
-    const v = (raw || "").trim();
-    if (!v) return "";
-    // se parece link sem protocolo, adiciona https://
-    if (/^[\w.-]+\.[a-z]{2,}\/?/i.test(v) && !/^https?:\/\//i.test(v)) return `https://${v}`;
-    return v;
-  }
-
   function handleAddSource() {
     if (!canUseSources) return;
-    const value = normalizeSource(sourceInput);
-    if (!value) return;
-
-    onAddSource(value);
-    setSourceInput("");
+    const v = (sourceDraft || "").trim();
+    if (!v) return;
+    onAddSource(v);
+    setSourceDraft("");
   }
 
   return (
@@ -118,12 +108,11 @@ export function AppShell({
       >
         <h2 style={{ marginTop: 0 }}>⚡ Criar Conteúdo</h2>
 
-        {/* 1) O que quer falar? */}
+        {/* O QUE QUER FALAR */}
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: "#444", marginBottom: 6 }}>
             Sobre o que você quer postar?
           </div>
-
           <input
             value={state?.topic || ""}
             onChange={(e) => onChangeTopic(e.target.value)}
@@ -136,11 +125,10 @@ export function AppShell({
               outline: "none",
             }}
           />
-
           <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>{statusText}</div>
         </div>
 
-        {/* 2) Qual a base? (fontes) */}
+        {/* QUAL A BASE (FONTES) */}
         <div style={{ marginTop: 10, marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: "#444", marginBottom: 6 }}>
             Qual a base? (fontes)
@@ -148,8 +136,8 @@ export function AppShell({
 
           <div style={{ display: "flex", gap: 8 }}>
             <input
-              value={sourceInput}
-              onChange={(e) => setSourceInput(e.target.value)}
+              value={sourceDraft}
+              onChange={(e) => setSourceDraft(e.target.value)}
               placeholder="Cole um link (YouTube/site/thread) ou um texto-base…"
               style={{
                 flex: 1,
@@ -167,15 +155,16 @@ export function AppShell({
 
             <button
               type="button"
-              disabled={!canUseSources || !sourceInput.trim()}
+              disabled={!canUseSources || !sourceDraft.trim()}
               onClick={handleAddSource}
               style={{
                 padding: "12px 14px",
                 borderRadius: 10,
                 border: "1px solid #e5e5e5",
-                background: !canUseSources || !sourceInput.trim() ? "#f6f6f6" : "#fff",
-                cursor: !canUseSources || !sourceInput.trim() ? "not-allowed" : "pointer",
+                background: !canUseSources || !sourceDraft.trim() ? "#f6f6f6" : "#fff",
+                cursor: !canUseSources || !sourceDraft.trim() ? "not-allowed" : "pointer",
                 fontWeight: 800,
+                opacity: !canUseSources || !sourceDraft.trim() ? 0.65 : 1,
               }}
             >
               + Add
@@ -186,7 +175,7 @@ export function AppShell({
             Dica: aperta <b>Enter</b> pra adicionar rápido.
           </div>
 
-          {sources?.length ? (
+          {sources.length ? (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
               {sources.map((s, idx) => (
                 <span
@@ -200,10 +189,13 @@ export function AppShell({
                     borderRadius: 999,
                     background: "rgba(16,185,129,0.10)",
                     border: "1px solid rgba(16,185,129,0.25)",
+                    maxWidth: 520,
                   }}
                   title={s}
                 >
-                  {s.length > 54 ? s.slice(0, 54) + "…" : s}
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {s}
+                  </span>
 
                   {canUseSources ? (
                     <button
@@ -215,7 +207,6 @@ export function AppShell({
                         cursor: "pointer",
                         fontWeight: 900,
                         color: "#065f46",
-                        lineHeight: 1,
                       }}
                       aria-label="Remover fonte"
                       title="Remover"
@@ -229,7 +220,7 @@ export function AppShell({
           ) : null}
         </div>
 
-        {/* 3) Qual o tom? (personalidade) */}
+        {/* QUAL O TOM (PERSONALIDADE) */}
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: "#444", marginBottom: 6 }}>
             Qual o tom? (personalidade)
@@ -258,7 +249,7 @@ export function AppShell({
           <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>{characteristicHint}</div>
         </div>
 
-        {/* 4) Plataforma + 5) Formato */}
+        {/* PLATAFORMA + FORMATO */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           <div>
             <div style={{ fontSize: 13, color: "#444", marginBottom: 8 }}>Plataforma</div>
@@ -424,8 +415,7 @@ export function AppShell({
                 <div>
                   <div style={{ fontSize: 12, color: "#666" }}>Métricas esperadas</div>
                   <div style={{ fontWeight: 700 }}>
-                    Eng.: {generated.expectedMetrics?.engagement} • Alc.:{" "}
-                    {generated.expectedMetrics?.reach}
+                    Eng.: {generated.expectedMetrics?.engagement} • Alc.: {generated.expectedMetrics?.reach}
                   </div>
                 </div>
               </div>
