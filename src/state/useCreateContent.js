@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { storage } from "../lib/storage";
 
 const DEFAULT_STATE = {
@@ -11,7 +11,9 @@ export function useCreateContent() {
   const [state, setState] = useState(DEFAULT_STATE);
   const [hydrated, setHydrated] = useState(false);
 
-  // Carrega do storage quando abre o app
+  const saveTimerRef = useRef(null);
+
+  // Carregar do storage quando abre o app
   useEffect(() => {
     let alive = true;
 
@@ -43,10 +45,19 @@ export function useCreateContent() {
     };
   }, []);
 
-  // Salva no storage sempre que mudar
+  // Salvar com debounce (evita salvar a cada tecla e perder foco)
   useEffect(() => {
     if (!hydrated) return;
-    storage.set("create-content-state", JSON.stringify(state));
+
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+
+    saveTimerRef.current = setTimeout(() => {
+      storage.set("create-content-state", JSON.stringify(state));
+    }, 400);
+
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
   }, [state, hydrated]);
 
   const setTopic = (topic) => setState((s) => ({ ...s, topic }));
