@@ -1,17 +1,8 @@
-function pick(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function clampHashtags(tags, max = 8) {
-  const uniq = Array.from(new Set(tags.map((t) => t.replace("#", "").trim())));
-  return uniq.filter(Boolean).slice(0, max);
-}
-
 function platformLabel(platform) {
   if (platform === "instagram") return "Instagram";
   if (platform === "twitter") return "Twitter/X";
   if (platform === "linkedin") return "LinkedIn";
-  return platform;
+  return platform || "Instagram";
 }
 
 function formatLabel(format) {
@@ -25,186 +16,250 @@ function formatLabel(format) {
     post: "Post",
     article: "Artigo",
   };
-  return map[format] || format;
+  return map[format] || format || "Feed Post";
 }
 
-function buildHashtags(topic, platform) {
-  const base = [
-    "marketing",
-    "conteudo",
-    "criadores",
-    "socialmedia",
-    "ia",
-    "produtividade",
-    "branding",
-    "estrategia",
-  ];
-
-  const crypto = ["cripto", "defi", "bitcoin", "web3", "onchain", "investimentos"];
-  const pt = ["brasil", "portugues", "criacao"];
-
-  const topicHints =
-    topic
-      .toLowerCase()
-      .split(/[\s,.;:!?/()]+/g)
-      .filter((w) => w.length >= 5)
-      .slice(0, 3) || [];
-
-  const extras =
-    platform === "linkedin"
-      ? ["carreira", "negocios", "gestao"]
-      : platform === "twitter"
-      ? ["buildinpublic", "makers", "threads"]
-      : ["reels", "creator", "instagrambr"];
-
-  return clampHashtags([...base, ...crypto, ...pt, ...topicHints, ...extras], platform === "twitter" ? 4 : 10);
-}
-
-function expectedMetrics(platform, format) {
-  // só “placeholders” pra UX
-  const table = {
-    instagram: {
-      feed: { engagement: "3%–6%", reach: "médio-alto" },
-      stories: { engagement: "4%–9%", reach: "alto (curto prazo)" },
-      reels: { engagement: "5%–12%", reach: "alto (descoberta)" },
-      carrossel: { engagement: "6%–10%", reach: "médio (alto salvamento)" },
+function characteristicProfile(id) {
+  const profiles = {
+    sell: {
+      label: "Vender (direto ao ponto)",
+      hook: "Atalho honesto:",
+      cta: "Quer que eu adapte isso pro seu caso? Comenta “QUERO”.",
+      hashtags: ["marketing", "vendas", "copywriting", "criadores"],
+      subheadline: "Atalho + clareza + ação.",
     },
-    twitter: {
-      tweet: { engagement: "1%–3%", reach: "médio" },
-      thread: { engagement: "2%–6%", reach: "alto (se o gancho for forte)" },
+    reflective: {
+      label: "Reflexivo / filosófico",
+      hook: "Uma reflexão que vale guardar:",
+      cta: "Se isso bateu, salva e manda pra alguém.",
+      hashtags: ["reflexao", "criadores", "conteudo", "mente"],
+      subheadline: "Uma ideia pra te acompanhar hoje.",
     },
-    linkedin: {
-      post: { engagement: "2%–5%", reach: "médio" },
-      article: { engagement: "1%–3%", reach: "médio (longo prazo)" },
+    investigative: {
+      label: "Repórter investigativo",
+      hook: "O que ninguém te contou:",
+      cta: "Se quiser, eu monto 3 ângulos com base nessas fontes.",
+      hashtags: ["investigacao", "conteudo", "analise", "criadores"],
+      subheadline: "Sem hype. Só evidência.",
+    },
+    educational: {
+      label: "Educativo / didático",
+      hook: "Guia rápido (sem enrolação):",
+      cta: "Salva pra usar como checklist.",
+      hashtags: ["educacao", "conteudo", "produtividade", "criadores"],
+      subheadline: "Prático e aplicável.",
+    },
+    controversial: {
+      label: "Polêmico (controlado)",
+      hook: "Opinião impopular (com argumento):",
+      cta: "Discorda? Beleza. Só responde com 1 contra-exemplo.",
+      hashtags: ["opinioes", "conteudo", "criadores", "debate"],
+      subheadline: "Discorde, mas leia até o fim.",
+    },
+    storytelling: {
+      label: "Storytelling",
+      hook: "Uma história real (e a lição):",
+      cta: "Se você já passou por isso, comenta “eu também”.",
+      hashtags: ["storytelling", "criadores", "conteudo", "aprendizados"],
+      subheadline: "Começa numa história, termina em ação.",
     },
   };
 
-  return table?.[platform]?.[format] || { engagement: "—", reach: "—" };
+  return profiles[id] || profiles.educational;
 }
 
-function bestTime(platform) {
-  return platform === "twitter"
-    ? "8h–10h ou 18h–20h"
-    : platform === "linkedin"
-    ? "12h–14h (dias úteis)"
-    : "18h–21h";
-}
-
-function makeTitle(topic, platform, format) {
-  const hooks = [
-    "A real pergunta é:",
-    "O que ninguém te conta:",
-    "Se você só souber disso, já ganha vantagem:",
-    "Checklist rápido:",
-    "Guia em 60 segundos:",
-    "O erro mais comum:",
-  ];
-
-  const suffix =
-    platform === "twitter" && format === "thread"
-      ? " (thread)"
-      : platform === "linkedin" && format === "article"
-      ? " (artigo)"
-      : "";
-
-  return `${pick(hooks)} ${topic}${suffix}`;
-}
-
-function makeDesignElements(topic, platform, format) {
-  const headline = topic.length > 42 ? topic.slice(0, 42).trim() + "…" : topic;
-
-  const subheadline = pick([
-    "Resumo prático + CTA no final",
-    "Exemplo real + passo a passo",
-    "Ideias prontas pra você copiar e postar",
-    "Sem enrolação: direto no ponto",
-  ]);
-
-  const visualConcept = pick([
-    "Gradiente moderno + ícone minimalista + tipografia forte",
-    "Card clean com headline grande e bullets curtos",
-    "Layout em 2 colunas: problema → solução",
-    "Carrossel: 1 gancho + 3 insights + 1 CTA",
-  ]);
-
-  const layout = `${platformLabel(platform)} • ${formatLabel(format)} — headline central + subheadline menor + bloco de bullets no rodapé`;
-
-  return { headline, subheadline, visualConcept, layout };
-}
-
-function makeCopy(topic, platform, format) {
-  const opening = pick([
-    `Você já parou pra pensar em: **${topic}**?`,
-    `Todo mundo fala sobre **${topic}**, mas pouca gente olha pro básico.`,
-    `Se você cria conteúdo e quer crescer, esse assunto é ouro: **${topic}**.`,
-    `Vamos destrinchar **${topic}** sem hype e com utilidade.`,
-  ]);
-
-  const bullets = [
-    "✅ O que isso muda na prática",
-    "✅ Como transformar em conteúdo hoje",
-    "✅ Erros que fazem você perder alcance",
-    "✅ Um template pra você copiar e postar",
-  ];
-
-  const outro = pick([
-    "Se você quiser, eu transformo isso em 3 variações (curta, média e agressiva).",
-    "Quer que eu adapte pra sua marca (tom, persona e palavras proibidas)?",
-    "Se isso te ajudou, salva e manda pra alguém que precisa ver.",
-  ]);
-
-  if (platform === "twitter" && format === "thread") {
-    // mini-thread fake (array de tweets)
-    const tweets = [
-      `1/ ${opening}`,
-      `2/ Contexto rápido: por que isso importa agora? Porque atenção é escassa e distribuição muda toda semana.`,
-      `3/ ${bullets[0]}\n- Qual ação você toma amanhã?\n- Qual métrica acompanha?\n- Qual promessa você faz?`,
-      `4/ ${bullets[1]}\nTemplate: “Você está fazendo X. Na verdade, o que funciona é Y. Faça isso: (passo 1, 2, 3).”`,
-      `5/ ${bullets[2]}\n- Gancho genérico\n- Sem prova/contraste\n- CTA fraco`,
-      `6/ ${bullets[3]}\nGancho: “O que ninguém te conta sobre ${topic}”\nCorpo: 3 insights\nCTA: pergunta direta`,
-      `7/ ${outro}\n\n(Próximo passo: ligar a IA pra gerar isso automaticamente 👀)`,
-    ];
-
-    return tweets.join("\n\n");
+function audienceTone(audience) {
+  const a = (audience || "").trim().toLowerCase();
+  if (!a) {
+    return {
+      prefix: "",
+      vocabulary: "neutro",
+      note: "",
+    };
   }
 
-  // post normal
-  return `${opening}
+  const beginnerHints = ["iniciante", "começando", "do zero", "leigo", "primeira vez"];
+  const advancedHints = ["avançado", "pro", "experiente", "sênior", "deep", "técnico", "power user"];
+  const founderHints = ["founder", "empreendedor", "saaS", "startup", "indie", "maker", "dev"];
+  const creatorHints = ["creator", "criador", "influencer", "ugc", "tiktok", "instagram", "youtuber"];
+  const b2bHints = ["b2b", "empresa", "time", "marketing", "vendas", "produto"];
 
-**O que você precisa saber (sem novela):**
-- ${bullets[0]}
-- ${bullets[1]}
-- ${bullets[2]}
-- ${bullets[3]}
+  const isBeginner = beginnerHints.some((k) => a.includes(k));
+  const isAdvanced = advancedHints.some((k) => a.includes(k));
+  const isFounder = founderHints.some((k) => a.includes(k));
+  const isCreator = creatorHints.some((k) => a.includes(k));
+  const isB2B = b2bHints.some((k) => a.includes(k));
 
-**Template rápido**
-“Você acha que ${topic}. Mas na real, o que funciona é ____. Faça ____ e meça ____.”
+  let vocabulary = "neutro";
+  if (isBeginner) vocabulary = "simples";
+  if (isAdvanced) vocabulary = "técnico (com precisão)";
 
-${outro}`;
+  const prefix = `Pra ${audience}: `;
+  const noteParts = [];
+
+  if (isBeginner) noteParts.push("sem jargão");
+  if (isAdvanced) noteParts.push("com nuance e trade-offs");
+  if (isFounder) noteParts.push("puxando pra crescimento e execução");
+  if (isCreator) noteParts.push("pensando em retenção e distribuição");
+  if (isB2B) noteParts.push("com foco em clareza e decisão");
+
+  const note = noteParts.length ? `(${noteParts.join(", ")})` : "";
+
+  return { prefix, vocabulary, note };
 }
 
-function makeCTA(platform) {
-  if (platform === "twitter") return "Comenta “QUERO” que eu gero uma versão mais agressiva.";
-  if (platform === "linkedin") return "Se quiser, comenta sua área que eu adapto o ângulo.";
-  return "Salva pra usar depois e manda pra um amigo creator.";
+function summarizeSources(sources) {
+  const arr = Array.isArray(sources) ? sources : [];
+  if (!arr.length) return "";
+
+  const first = arr[0]?.value || "";
+  const total = arr.length;
+
+  if (total === 1) return `Base: 1 fonte — ${first}`;
+  return `Base: ${total} fontes — ex: ${first}`;
 }
 
-export function generateFakeContent({ topic, platform, format }) {
-  const safeTopic = (topic || "").trim() || "um tema viral de hoje";
+function bestTimeFor(platform) {
+  if (platform === "twitter") return "8h–10h ou 18h–20h";
+  if (platform === "linkedin") return "12h–14h";
+  return "18h–21h";
+}
+
+function expectedMetricsFor(platform, characteristic) {
+  if (platform === "twitter" && characteristic === "controversial") {
+    return { engagement: "alto", reach: "alto (se a resposta vier rápido)" };
+  }
+  if (platform === "linkedin" && (characteristic === "educational" || characteristic === "investigative")) {
+    return { engagement: "médio-alto", reach: "médio-alto" };
+  }
+  return { engagement: "médio", reach: "médio-alto" };
+}
+
+function buildCopy({ topic, audience, platform, format, characteristic, sources }) {
+  const profile = characteristicProfile(characteristic);
+  const aud = audienceTone(audience);
+  const baseLine = summarizeSources(sources);
+
+  const whoLine = audience?.trim()
+    ? `🎯 Público-alvo: ${audience.trim()} ${aud.note}`.trim()
+    : "";
+
+  // THREAD (twitter)
+  if (platform === "twitter" && format === "thread") {
+    const intro = `1/ ${profile.hook} **${topic}**.\n${aud.prefix}${aud.note}`.trim();
+    const body = [
+      `2/ Contexto rápido: por que isso importa agora? Porque atenção é escassa e distribuição muda toda semana.`,
+      `3/ ✅ O que muda na prática:\n- o que você faz amanhã?\n- qual métrica acompanha?\n- qual promessa você evita?`,
+      `4/ Um template que funciona:\n“Você está fazendo X. Na verdade, o que funciona é Y. Faça isso (passo 1, 2, 3).”`,
+      `5/ Erros que derrubam alcance:\n- gancho genérico\n- sem prova/contraste\n- CTA fraco`,
+      audience?.trim()
+        ? `6/ Ajuste fino pra ${audience.trim()}:\n- exemplo mais próximo do seu contexto\n- vocabulário: ${aud.vocabulary}\n- CTA alinhado ao momento`
+        : `6/ Ajuste fino: troque o exemplo e o CTA pro seu contexto.`,
+      baseLine ? `7/ ${baseLine}` : null,
+      `8/ ${profile.cta}`,
+    ].filter(Boolean);
+
+    return `${intro}\n\n${body.join("\n\n")}`;
+  }
+
+  // TWEET (twitter)
+  if (platform === "twitter" && format === "tweet") {
+    const line1 = `${profile.hook} ${topic}.`;
+    const line2 = audience?.trim()
+      ? `Pra ${audience.trim()}, o erro nº1 é tentar parecer “expert” cedo demais.`
+      : `O erro nº1 é tentar ser genérico pra todo mundo.`;
+    const line3 = `Faz isso: 1) hook claro 2) 1 prova/contraste 3) 1 próximo passo.`;
+    const line4 = profile.cta;
+    const extra = baseLine ? `\n\n${baseLine}` : "";
+    return `${line1}\n\n${line2}\n${line3}\n\n${line4}${extra}`;
+  }
+
+  // LINKEDIN/IG (padrão)
+  const opening = `${profile.hook} ${topic}`;
+  const bullets = [
+    audience?.trim()
+      ? `🎯 Pra quem: ${audience.trim()} ${aud.note}`.trim()
+      : null,
+    `✅ 1 ideia que quase ninguém aplica (e é simples).`,
+    `✅ 1 erro comum que derruba alcance.`,
+    `✅ 1 passo prático pra hoje.`,
+    baseLine ? `📚 ${baseLine}` : null,
+    `👉 ${profile.cta}`,
+  ].filter(Boolean);
+
+  return `${opening}\n\n${bullets.join("\n")}`;
+}
+
+function buildTitle({ topic, audience, characteristic, platform, format }) {
+  const profile = characteristicProfile(characteristic);
+  const isThread = platform === "twitter" && format === "thread";
+
+  if (audience?.trim() && isThread) return `Pra ${audience.trim()}: ${topic} (${profile.label})`;
+  if (audience?.trim()) return `${topic} — pra ${audience.trim()}`;
+  if (isThread) return `A real pergunta é: ${topic} (thread)`;
+  return `O que você precisa saber sobre ${topic}`;
+}
+
+function buildDesignElements({ topic, audience, characteristic, platform, format }) {
+  const profile = characteristicProfile(characteristic);
+
+  const headline =
+    topic.length > 42 ? topic.slice(0, 42).trim() + "…" : topic;
+
+  const sub =
+    audience?.trim()
+      ? `${profile.subheadline} • pra ${audience.trim()}`
+      : profile.subheadline;
 
   return {
-    title: makeTitle(safeTopic, platform, format),
-    copy: makeCopy(safeTopic, platform, format),
-    hashtags: buildHashtags(safeTopic, platform),
-    designElements: makeDesignElements(safeTopic, platform, format),
-    cta: makeCTA(platform),
-    bestTime: bestTime(platform),
-    expectedMetrics: expectedMetrics(platform, format),
-    meta: {
-      generator: "fake",
-      platform,
-      format,
-      createdAt: new Date().toISOString(),
-    },
+    headline,
+    subheadline: sub,
+    layout: `${platformLabel(platform)} / ${formatLabel(format)} — headline central + subheadline + tag`,
+    visualConcept:
+      "Card clean com contraste forte, headline grande e uma sublinha que explica o ângulo. Sem poluição.",
+  };
+}
+
+export function generateFakeContent({
+  topic,
+  audience,
+  platform = "instagram",
+  format = "feed",
+  characteristic = "educational",
+  sources = [],
+}) {
+  const safeTopic = String(topic || "").trim();
+  if (!safeTopic) {
+    return {
+      title: "",
+      copy: "",
+      hashtags: [],
+      cta: "",
+      designElements: { headline: "Headline", subheadline: "Subheadline" },
+      bestTime: bestTimeFor(platform),
+      expectedMetrics: expectedMetricsFor(platform, characteristic),
+    };
+  }
+
+  const profile = characteristicProfile(characteristic);
+
+  const title = buildTitle({ topic: safeTopic, audience, characteristic, platform, format });
+  const copy = buildCopy({ topic: safeTopic, audience, platform, format, characteristic, sources });
+
+  const hashtags = profile.hashtags;
+
+  // CTA já vem do profile, mas mantém campo separado pro AppShell
+  const cta = profile.cta;
+
+  const designElements = buildDesignElements({ topic: safeTopic, audience, characteristic, platform, format });
+
+  return {
+    title,
+    copy,
+    hashtags,
+    cta,
+    designElements,
+    bestTime: bestTimeFor(platform),
+    expectedMetrics: expectedMetricsFor(platform, characteristic),
   };
 }
