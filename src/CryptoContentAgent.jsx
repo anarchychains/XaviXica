@@ -869,10 +869,10 @@ export default function CryptoContentAgent() {
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 34, fontWeight: 1000, display: "flex", gap: 10, justifyContent: "center", alignItems: "center" }}>
             <Sparkles size={22} />
-            Agente Designer de Conteúdo
+            Agente de Criação de Conteúdo
           </div>
           <div style={{ color: "#6b7280", marginTop: 6 }}>
-            Plataforma completa de gestão de redes sociais com IA (vibe coding edition)
+            Agente de IA para creators: crie, planeje e escale conteúdo com consistência.
           </div>
         </div>
 
