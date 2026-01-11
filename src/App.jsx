@@ -7,6 +7,7 @@ export default function App() {
   const {
     state,
     setTopic,
+    setAudience, // NOVO ✅
     setPlatform,
     setFormat,
     setCharacteristic,
@@ -24,10 +25,11 @@ export default function App() {
   function handleGenerate() {
     const content = generateFakeContent({
       topic: state.topic,
+      audience: state.audience, // NOVO ✅
       platform: state.platform,
       format: state.format,
       characteristic: state.characteristic,
-      sources: state.sources, // por enquanto só passa; depois a IA usa
+      sources: state.sources,
     });
 
     setGenerated(content);
@@ -40,6 +42,7 @@ export default function App() {
       statusText={statusText}
       state={state}
       onChangeTopic={setTopic}
+      onChangeAudience={setAudience} // NOVO ✅
       onChangePlatform={setPlatform}
       onChangeFormat={setFormat}
       onChangeCharacteristic={setCharacteristic}
