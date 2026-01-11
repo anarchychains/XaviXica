@@ -27,7 +27,7 @@ export default function App() {
       platform: state.platform,
       format: state.format,
       characteristic: state.characteristic,
-      sources: state.sources,
+      sources: state.sources, // por enquanto só passa; depois a IA usa
     });
 
     setGenerated(content);
