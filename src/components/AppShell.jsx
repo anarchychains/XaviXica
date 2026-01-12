@@ -30,6 +30,18 @@ function FormatLabel(format) {
   return map[format] || format;
 }
 
+function CharacteristicLabel(id) {
+  const map = {
+    sell: "Vender",
+    reflective: "Reflexivo",
+    investigative: "Investigativo",
+    educational: "Didático",
+    controversial: "Polêmico",
+    storytelling: "Storytelling",
+  };
+  return map[id] || id || "Didático";
+}
+
 function formatSourcePillLabel(src) {
   const value = src?.value || "";
   const type = src?.type || "text";
