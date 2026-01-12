@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 
 const CHARACTERISTICS = [
   { id: "sell", label: "Vender (direto ao ponto)", hint: "Oferta, benefício, CTA forte." },
@@ -70,6 +70,23 @@ export function AppShell({
   const characteristic = state?.characteristic || "educational";
   const sources = Array.isArray(state?.sources) ? state.sources : [];
   const audience = state?.audience || ""; // NOVO ✅
+  // Público-alvo (estado local da UI)
+const [audiencePreset, setAudiencePreset] = useState("");
+const [audienceText, setAudienceText] = useState("");
+
+// Público-alvo final (campo livre ganha do preset)
+const audienceFinal =
+  (audienceText || "").trim() ||
+  (audiencePreset || "").trim() ||
+  "";
+
+// Sincroniza com o estado global
+useEffect(() => {
+  if (typeof onChangeAudience === "function") {
+    onChangeAudience(audienceFinal);
+  }
+}, [audienceFinal, onChangeAudience]);
+
 
   const canUseSources =
     typeof onAddSource === "function" && typeof onRemoveSource === "function";
