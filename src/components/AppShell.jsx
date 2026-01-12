@@ -287,7 +287,63 @@ export function AppShell({
             </div>
           ) : null}
         </div>
+{/* PÚBLICO-ALVO */}
+<div style={{ marginBottom: 12 }}>
+  <div style={{ fontSize: 13, color: "#444", marginBottom: 6 }}>
+    Com quem esse conteúdo vai falar? (público-alvo)
+  </div>
 
+  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+    <select
+      value={audiencePreset}
+      onChange={(e) => setAudiencePreset(e.target.value)}
+      style={{
+        width: "100%",
+        padding: 12,
+        borderRadius: 10,
+        border: "1px solid #ddd",
+        outline: "none",
+        background: "#fff",
+        fontWeight: 700,
+      }}
+    >
+      <option value="">Escolha um público (opcional)</option>
+      <option value="criadores iniciantes">Criadores iniciantes</option>
+      <option value="criadores avançados">Criadores avançados</option>
+      <option value="social media / agência">Social media / agência</option>
+      <option value="founders / builders">Founders / builders</option>
+      <option value="marketing B2B">Marketing B2B</option>
+      <option value="marketing B2C">Marketing B2C</option>
+      <option value="web3 / cripto">Web3 / cripto</option>
+      <option value="devs / produto">Devs / produto</option>
+      <option value="público geral">Público geral</option>
+    </select>
+
+    <input
+      value={audienceText}
+      onChange={(e) => setAudienceText(e.target.value)}
+      placeholder='Ou escreva algo específico (ex: "donas de loja de roupa no Instagram")'
+      style={{
+        width: "100%",
+        padding: 12,
+        borderRadius: 10,
+        border: "1px solid #ddd",
+        outline: "none",
+      }}
+    />
+  </div>
+
+  <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+    Dica: quanto mais específico, mais a IA acerta o vocabulário, exemplos e ganchos.
+  </div>
+
+  <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+    Selecionado:{" "}
+    <b>{(audienceText || "").trim() || audiencePreset || "—"}</b>
+  </div>
+</div>
+
+        
         {/* QUAL O TOM (PERSONALIDADE) */}
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: "#444", marginBottom: 6 }}>
