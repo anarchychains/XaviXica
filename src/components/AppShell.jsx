@@ -20,6 +20,18 @@ const AUDIENCE_PRESETS = [
   { id: "investidores", label: "Investidores" },
 ];
 
+const CTA_PRESETS = [
+  { id: "", label: "— escolher um CTA (opcional) —" },
+  { id: "Baixe o app (link na bio)", label: "Baixe o app" },
+  { id: "Abra sua conta / cadastre-se", label: "Abra sua conta" },
+  { id: "Comece agora / experimente", label: "Comece agora" },
+  { id: "Entre na lista / waitlist", label: "Entre na lista / waitlist" },
+  { id: "Saiba mais (link)", label: "Saiba mais" },
+  { id: "Fale com a gente (DM/WhatsApp)", label: "Fale com a gente" },
+  { id: 'Comente "PALAVRA"', label: 'Comente "PALAVRA"' },
+  { id: "Salve e compartilhe", label: "Salve e compartilhe" },
+];
+
 function PlatformLabel(platform) {
   if (platform === "instagram") return "Instagram";
   if (platform === "twitter") return "Twitter/X";
@@ -54,7 +66,6 @@ function CharacteristicLabel(id) {
 }
 
 function formatSourcePillLabel(src) {
-  // suporta string ou objeto {type,value}
   const value = typeof src === "string" ? src : src?.value || "";
   const type = typeof src === "string" ? "text" : src?.type || "text";
   const short = value.length > 54 ? value.slice(0, 54) + "…" : value;
@@ -63,7 +74,7 @@ function formatSourcePillLabel(src) {
 }
 
 function isLikelyUrl(v) {
-  return /^https?:\/\/\S+/i.test(v || "");
+  return /^https?:\/\/\S+/i.test(v || "") || /^www\.\S+/i.test(v || "");
 }
 
 export function AppShell({
@@ -72,7 +83,8 @@ export function AppShell({
   statusText,
   state,
   onChangeTopic,
-  onChangeAudience, // ✅
+  onChangeAudience,
+  onChangeCta,
   onChangePlatform,
   onChangeFormat,
   onChangeCharacteristic,
@@ -92,22 +104,23 @@ export function AppShell({
       if (typeof s === "string") {
         return { type: isLikelyUrl(s) ? "link" : "text", value: s };
       }
-      return { type: s?.type || (isLikelyUrl(s?.value) ? "link" : "text"), value: s?.value || "" };
+      return {
+        type: s?.type || (isLikelyUrl(s?.value) ? "link" : "text"),
+        value: s?.value || "",
+      };
     });
   }, [rawSources]);
 
-  const canUseSources =
-    typeof onAddSource === "function" && typeof onRemoveSource === "function";
+  const canUseSources = typeof onAddSource === "function" && typeof onRemoveSource === "function";
 
   const [sourceInput, setSourceInput] = useState("");
   const [sourceHint, setSourceHint] = useState("");
 
-  // ---------- PÚBLICO-ALVO (ÚNICO) ----------
+  // ---------- PÚBLICO-ALVO (preset + livre → 1 campo final) ----------
   const didInitAudienceRef = useRef(false);
   const [audiencePreset, setAudiencePreset] = useState("");
   const [audienceText, setAudienceText] = useState("");
 
-  // preenche 1x com o que já veio do state (se existir)
   useEffect(() => {
     if (didInitAudienceRef.current) return;
     const existing = (state?.audience || "").trim();
@@ -120,11 +133,30 @@ export function AppShell({
   }, [audienceText, audiencePreset]);
 
   useEffect(() => {
-    if (typeof onChangeAudience === "function") {
-      onChangeAudience(audienceFinal);
-    }
+    if (typeof onChangeAudience === "function") onChangeAudience(audienceFinal);
   }, [audienceFinal, onChangeAudience]);
-  // -----------------------------------------
+  // -------------------------------------------------------------
+
+  // ---------- CTA (preset + livre → 1 campo final) ----------
+  const didInitCtaRef = useRef(false);
+  const [ctaPreset, setCtaPreset] = useState("");
+  const [ctaText, setCtaText] = useState("");
+
+  useEffect(() => {
+    if (didInitCtaRef.current) return;
+    const existing = (state?.cta || "").trim();
+    if (existing) setCtaText(existing);
+    didInitCtaRef.current = true;
+  }, [state?.cta]);
+
+  const ctaFinal = useMemo(() => {
+    return (ctaText || "").trim() || (ctaPreset || "").trim() || "";
+  }, [ctaText, ctaPreset]);
+
+  useEffect(() => {
+    if (typeof onChangeCta === "function") onChangeCta(ctaFinal);
+  }, [ctaFinal, onChangeCta]);
+  // -------------------------------------------------------------
 
   const sourcesCountText = useMemo(() => {
     const n = sources.length || 0;
@@ -171,7 +203,6 @@ export function AppShell({
       return;
     }
 
-    // mantém compatibilidade: manda string pro handler e deixa o pai decidir como armazenar
     onAddSource(trimmed);
     setSourceInput("");
     setSourceHint("Fonte adicionada ✅");
@@ -213,12 +244,10 @@ export function AppShell({
               outline: "none",
             }}
           />
-          <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
-            {statusText}
-          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>{statusText}</div>
         </div>
 
-        {/* PÚBLICO-ALVO (ÚNICO) ✅ */}
+        {/* PÚBLICO-ALVO ✅ */}
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: "#444", marginBottom: 6 }}>
             Com quem esse conteúdo vai falar? (público-alvo)
@@ -265,6 +294,56 @@ export function AppShell({
 
           <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
             Selecionado: <b>{audienceFinal || "—"}</b>
+          </div>
+        </div>
+
+        {/* CTA DESEJADO ✅ */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 13, color: "#444", marginBottom: 6 }}>
+            Qual CTA você quer no final?
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <select
+              value={ctaPreset}
+              onChange={(e) => setCtaPreset(e.target.value)}
+              style={{
+                width: "100%",
+                padding: 12,
+                borderRadius: 10,
+                border: "1px solid #ddd",
+                outline: "none",
+                background: "#fff",
+                fontWeight: 700,
+              }}
+            >
+              {CTA_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+
+            <input
+              value={ctaText}
+              onChange={(e) => setCtaText(e.target.value)}
+              placeholder='Ou escreva algo específico (ex: "Baixe o app e abra sua conta em 2 min")'
+              style={{
+                width: "100%",
+                padding: 12,
+                borderRadius: 10,
+                border: "1px solid #ddd",
+                outline: "none",
+              }}
+            />
+          </div>
+
+          <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+            Dica: CTA define o objetivo do post. Se você quer <b>download</b> ou <b>cadastro</b>, a copy muda tudo.
+          </div>
+
+          <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+            Selecionado: <b>{ctaFinal || "—"}</b>
           </div>
         </div>
 
@@ -392,9 +471,7 @@ export function AppShell({
             ))}
           </select>
 
-          <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
-            {characteristicHint}
-          </div>
+          <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>{characteristicHint}</div>
         </div>
 
         {/* PLATAFORMA + FORMATO */}
@@ -588,6 +665,11 @@ export function AppShell({
                 {audienceFinal ? (
                   <>
                     {" "}• Público: <b>{audienceFinal}</b>
+                  </>
+                ) : null}
+                {ctaFinal ? (
+                  <>
+                    {" "}• CTA desejado: <b>{ctaFinal}</b>
                   </>
                 ) : null}
               </div>
