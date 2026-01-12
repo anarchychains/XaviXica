@@ -7,7 +7,7 @@ export default function App() {
   const {
     state,
     setTopic,
-    setAudience, // NOVO ✅
+    setAudience,
     setPlatform,
     setFormat,
     setCharacteristic,
@@ -25,11 +25,11 @@ export default function App() {
   function handleGenerate() {
     const content = generateFakeContent({
       topic: state.topic,
-      audience: state.audience, // NOVO ✅
+      audience: state.audience, // ✅ novo
       platform: state.platform,
       format: state.format,
-      characteristic: state.characteristic,
-      sources: state.sources,
+      characteristic: state.characteristic, // ✅ novo
+      sources: state.sources, // ✅ novo
     });
 
     setGenerated(content);
@@ -42,12 +42,12 @@ export default function App() {
       statusText={statusText}
       state={state}
       onChangeTopic={setTopic}
-      onChangeAudience={setAudience} // NOVO ✅
+      onChangeAudience={setAudience} // ✅
       onChangePlatform={setPlatform}
       onChangeFormat={setFormat}
-      onChangeCharacteristic={setCharacteristic}
-      onAddSource={addSource}
-      onRemoveSource={removeSource}
+      onChangeCharacteristic={setCharacteristic} // ✅
+      onAddSource={addSource} // ✅
+      onRemoveSource={removeSource} // ✅
       onGenerate={handleGenerate}
       generated={generated}
     />
