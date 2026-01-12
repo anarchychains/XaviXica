@@ -7,7 +7,7 @@ export default function App() {
     state,
     setTopic,
     setAudience,
-    setCta, // ✅ NOVO
+    setCta,
     setPlatform,
     setFormat,
     setCharacteristic,
@@ -16,6 +16,7 @@ export default function App() {
   } = useCreateContent();
 
   const [generated, setGenerated] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   const statusText = useMemo(() => {
     if (!state?.topic?.trim()) return "Digite um tema pra começar.";
@@ -23,47 +24,50 @@ export default function App() {
   }, [state?.topic]);
 
   async function handleGenerate() {
-  try {
-    setGenerated(null);
+    try {
+      setLoading(true);
+      setGenerated(null);
 
-    const res = await fetch("/api/generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        topic: state.topic,
-        audience: state.audience,
-        ctaDesired: state.cta,
-        platform: state.platform,
-        format: state.format,
-        characteristic: state.characteristic,
-        sources: state.sources,
-      }),
-    });
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic: state.topic,
+          audience: state.audience,
+          ctaDesired: state.cta,
+          platform: state.platform,
+          format: state.format,
+          characteristic: state.characteristic,
+          sources: state.sources,
+        }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (!res.ok) {
-      console.error("API error:", data);
-      alert(data?.error || "Erro ao gerar conteúdo");
-      return;
+      if (!res.ok) {
+        console.error("API error:", data);
+        alert(data?.error || "Erro ao gerar conteúdo");
+        return;
+      }
+
+      setGenerated(data);
+    } catch (err) {
+      console.error(err);
+      alert("Falha ao chamar a API");
+    } finally {
+      setLoading(false);
     }
-
-    setGenerated(data);
-  } catch (err) {
-    console.error(err);
-    alert("Falha ao chamar a API");
   }
-}
 
   return (
     <AppShell
       title="Agente de Criação de Conteúdo"
       subtitle="Agente de IA para creators: criar, planejar e escalar sua produção de conteúdo"
-      statusText={statusText}
+      statusText={loading ? "Gerando conteúdo com IA…" : statusText}
       state={state}
       onChangeTopic={setTopic}
       onChangeAudience={setAudience}
-      onChangeCta={setCta} // ✅ NOVO
+      onChangeCta={setCta}
       onChangePlatform={setPlatform}
       onChangeFormat={setFormat}
       onChangeCharacteristic={setCharacteristic}
