@@ -17,15 +17,12 @@ function sourcesToText(sources) {
 }
 
 async function readJsonBody(req) {
-  // tenta usar req.body (quando o runtime já parseou)
   if (req.body && typeof req.body === "object") return req.body;
 
-  // se veio string
   if (typeof req.body === "string") {
     try { return JSON.parse(req.body); } catch { return {}; }
   }
 
-  // fallback: lê o stream
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   const raw = Buffer.concat(chunks).toString("utf8");
@@ -33,9 +30,87 @@ async function readJsonBody(req) {
   try { return JSON.parse(raw); } catch { return {}; }
 }
 
+/**
+ * Pequena pausa (ms)
+ */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Decide se vale retry e quanto esperar.
+ * - 429 por rate limit → retry
+ * - 429 por billing/quota → NÃO retry
+ */
+function classifyOpenAIError(err) {
+  const status = err?.status || err?.response?.status;
+  const code = err?.code || err?.error?.code;
+  const message = String(err?.message || "");
+
+  const is429 = status === 429;
+  const isRateLimit =
+    is429 && (code === "rate_limit_exceeded" || /rate limit/i.test(message));
+
+  const isQuotaOrBilling =
+    is429 && (code === "insufficient_quota" || /insufficient_quota/i.test(message) || /billing/i.test(message));
+
+  // fallback: 5xx temporários também podem valer retry
+  const is5xx = status >= 500 && status <= 599;
+
+  return {
+    status,
+    code,
+    message,
+    isRateLimit,
+    isQuotaOrBilling,
+    isRetryable: isRateLimit || is5xx,
+    publicCode: isQuotaOrBilling
+      ? "insufficient_quota"
+      : isRateLimit
+      ? "rate_limited"
+      : is5xx
+      ? "temporary_error"
+      : "unknown_error",
+  };
+}
+
+/**
+ * Faz a chamada ao OpenAI com retry (quando fizer sentido).
+ */
+async function createResponseWithRetry(payload, { maxRetries = 3 } = {}) {
+  let attempt = 0;
+
+  while (true) {
+    try {
+      return await openai.responses.create(payload);
+    } catch (err) {
+      const info = classifyOpenAIError(err);
+      attempt += 1;
+
+      // Se for quota/billing: nem tenta de novo
+      if (info.isQuotaOrBilling) throw err;
+
+      // Se não for retryable ou estourou tentativas: desiste
+      if (!info.isRetryable || attempt > maxRetries) throw err;
+
+      // Exponential backoff com “jitter” (aleatoriezinho)
+      const base = 500; // 0.5s
+      const wait = base * Math.pow(2, attempt - 1);
+      const jitter = Math.floor(Math.random() * 250); // até 250ms
+      await sleep(wait + jitter);
+    }
+  }
+}
+
 export default async function handler(req, res) {
+  // Dica: ajuda debug e suporte
+  const traceId =
+    req.headers["x-vercel-id"] ||
+    req.headers["x-request-id"] ||
+    `local_${Date.now()}`;
+
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Use POST" });
+    return res.status(405).json({ error: "Use POST", traceId });
   }
 
   try {
@@ -53,15 +128,15 @@ export default async function handler(req, res) {
 
     const safeTopic = String(topic || "").trim();
     if (!safeTopic) {
-      return res.status(400).json({ error: "topic é obrigatório" });
+      return res.status(400).json({ error: "topic é obrigatório", traceId });
     }
 
-    // Debug sem vazar segredo
     const hasKey = Boolean(process.env.OPENAI_API_KEY);
     if (!hasKey) {
       return res.status(500).json({
         error: "OPENAI_API_KEY não encontrada no ambiente",
         detail: "Verifique as Environment Variables do projeto correto no Vercel e faça um redeploy.",
+        traceId,
       });
     }
 
@@ -115,12 +190,14 @@ Regras:
 
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-    const response = await openai.responses.create({
+    const payload = {
       model,
       input: [
         { role: "system", content: system },
         { role: "user", content: user },
       ],
+      // ✅ Limita o tamanho da resposta (mais estável)
+      max_output_tokens: 700,
       text: {
         format: {
           type: "json_schema",
@@ -129,17 +206,68 @@ Regras:
           schema,
         },
       },
-    });
+    };
+
+    const response = await createResponseWithRetry(payload, { maxRetries: 3 });
 
     const jsonText = response.output_text;
-    const parsed = JSON.parse(jsonText);
 
-    return res.status(200).json(parsed);
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch (e) {
+      // Se por algum motivo raro vier algo inválido, devolve erro “explicável”
+      return res.status(502).json({
+        error: "A IA retornou um JSON inválido (raro).",
+        detail: "Tente novamente. Se persistir, revise o prompt/schema.",
+        traceId,
+      });
+    }
+
+    return res.status(200).json({ ...parsed, traceId });
   } catch (err) {
-    console.error("generate error:", err);
+    const info = classifyOpenAIError(err);
+
+    console.error("generate error:", {
+      traceId,
+      status: info.status,
+      code: info.code,
+      message: info.message,
+    });
+
+    // ✅ Erros que a UI consegue tratar bonitinho
+    if (info.publicCode === "insufficient_quota") {
+      return res.status(429).json({
+        error: "Limite de uso/billing atingido na OpenAI.",
+        code: "insufficient_quota",
+        detail: "Verifique billing/limites do projeto e tente novamente.",
+        traceId,
+      });
+    }
+
+    if (info.publicCode === "rate_limited") {
+      return res.status(429).json({
+        error: "Muitas tentativas em sequência (rate limit).",
+        code: "rate_limited",
+        detail: "Aguarde alguns segundos e tente novamente.",
+        traceId,
+      });
+    }
+
+    if (info.publicCode === "temporary_error") {
+      return res.status(503).json({
+        error: "Instabilidade temporária ao gerar conteúdo.",
+        code: "temporary_error",
+        detail: "Tente novamente em alguns segundos.",
+        traceId,
+      });
+    }
+
     return res.status(500).json({
       error: "Falha ao gerar conteúdo",
-      detail: String(err?.message || err),
+      code: "unknown_error",
+      detail: info.message,
+      traceId,
     });
   }
 }
