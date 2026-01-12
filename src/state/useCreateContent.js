@@ -28,13 +28,17 @@ function normalizeSources(rawSources) {
     .map((item) => {
       if (!item) return null;
 
+      // {type,value}
       if (typeof item === "object" && item.value) {
+        const value = String(item.value).trim();
+        if (!value) return null;
         return {
-          type: item.type || detectSourceType(item.value),
-          value: String(item.value).trim(),
+          type: item.type || detectSourceType(value),
+          value,
         };
       }
 
+      // "string"
       if (typeof item === "string") {
         const value = item.trim();
         if (!value) return null;
@@ -73,10 +77,18 @@ export function useCreateContent() {
               ...parsed,
             };
 
+            // fontes
             next.sources = normalizeSources(parsed?.sources);
 
+            // audience / cta (string ou vazio)
             next.audience = typeof parsed?.audience === "string" ? parsed.audience : "";
-            next.cta = typeof parsed?.cta === "string" ? parsed.cta : ""; // ✅ NOVO
+            next.cta = typeof parsed?.cta === "string" ? parsed.cta : "";
+
+            // characteristic (garante fallback)
+            next.characteristic =
+              typeof parsed?.characteristic === "string" && parsed.characteristic
+                ? parsed.characteristic
+                : DEFAULT_STATE.characteristic;
 
             setState(next);
           } catch {
@@ -110,6 +122,7 @@ export function useCreateContent() {
     };
   }, [state, hydrated]);
 
+  // setters
   const setTopic = (topic) => setState((s) => ({ ...s, topic }));
   const setAudience = (audience) => setState((s) => ({ ...s, audience }));
   const setCta = (cta) => setState((s) => ({ ...s, cta })); // ✅ NOVO
@@ -117,6 +130,7 @@ export function useCreateContent() {
   const setFormat = (format) => setState((s) => ({ ...s, format }));
   const setCharacteristic = (characteristic) => setState((s) => ({ ...s, characteristic }));
 
+  // fontes
   const addSource = (rawValue) => {
     const value = String(rawValue || "").trim();
     if (!value) return;
@@ -139,6 +153,7 @@ export function useCreateContent() {
     setState((s) => {
       const sources = normalizeSources(s.sources);
       if (index < 0 || index >= sources.length) return s;
+
       return {
         ...s,
         sources: sources.filter((_, i) => i !== index),
