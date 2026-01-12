@@ -3,7 +3,8 @@ import { storage } from "../lib/storage";
 
 const DEFAULT_STATE = {
   topic: "",
-  audience: "", // NOVO ✅
+  audience: "",
+  cta: "", // ✅ NOVO
   platform: "instagram",
   format: "feed",
   characteristic: "educational",
@@ -54,6 +55,7 @@ export function useCreateContent() {
   const [hydrated, setHydrated] = useState(false);
   const saveTimerRef = useRef(null);
 
+  // Carregar do storage quando abre o app
   useEffect(() => {
     let alive = true;
 
@@ -73,8 +75,8 @@ export function useCreateContent() {
 
             next.sources = normalizeSources(parsed?.sources);
 
-            // audiência pode ter vindo vazia ou inexistente, ok
             next.audience = typeof parsed?.audience === "string" ? parsed.audience : "";
+            next.cta = typeof parsed?.cta === "string" ? parsed.cta : ""; // ✅ NOVO
 
             setState(next);
           } catch {
@@ -93,6 +95,7 @@ export function useCreateContent() {
     };
   }, []);
 
+  // Salvar com debounce
   useEffect(() => {
     if (!hydrated) return;
 
@@ -108,7 +111,8 @@ export function useCreateContent() {
   }, [state, hydrated]);
 
   const setTopic = (topic) => setState((s) => ({ ...s, topic }));
-  const setAudience = (audience) => setState((s) => ({ ...s, audience })); // NOVO ✅
+  const setAudience = (audience) => setState((s) => ({ ...s, audience }));
+  const setCta = (cta) => setState((s) => ({ ...s, cta })); // ✅ NOVO
   const setPlatform = (platform) => setState((s) => ({ ...s, platform }));
   const setFormat = (format) => setState((s) => ({ ...s, format }));
   const setCharacteristic = (characteristic) => setState((s) => ({ ...s, characteristic }));
@@ -148,7 +152,8 @@ export function useCreateContent() {
     state,
     hydrated,
     setTopic,
-    setAudience, // NOVO ✅
+    setAudience,
+    setCta, // ✅ NOVO
     setPlatform,
     setFormat,
     setCharacteristic,
