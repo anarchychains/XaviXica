@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 
 const CHARACTERISTICS = [
   { id: "sell", label: "Vender (direto ao ponto)", hint: "Oferta, benefício, CTA forte." },
@@ -7,6 +7,17 @@ const CHARACTERISTICS = [
   { id: "educational", label: "Educativo / didático", hint: "Explica sem jargão, passo a passo." },
   { id: "controversial", label: "Polêmico (controlado)", hint: "Provoca sem ser tóxico." },
   { id: "storytelling", label: "Storytelling", hint: "História → insight → ação." },
+];
+
+const AUDIENCE_PRESETS = [
+  { id: "", label: "— escolher um público (opcional) —" },
+  { id: "iniciante", label: "Iniciantes (zero a um)" },
+  { id: "intermediario", label: "Intermediários (já entendem o básico)" },
+  { id: "avancado", label: "Avançados (deep dive, sem rodeio)" },
+  { id: "criadores", label: "Criadores de conteúdo" },
+  { id: "empreendedores", label: "Empreendedores / founders" },
+  { id: "dev", label: "Devs / builders" },
+  { id: "investidores", label: "Investidores" },
 ];
 
 function PlatformLabel(platform) {
@@ -43,11 +54,16 @@ function CharacteristicLabel(id) {
 }
 
 function formatSourcePillLabel(src) {
-  const value = src?.value || "";
-  const type = src?.type || "text";
+  // suporta string ou objeto {type,value}
+  const value = typeof src === "string" ? src : src?.value || "";
+  const type = typeof src === "string" ? "text" : src?.type || "text";
   const short = value.length > 54 ? value.slice(0, 54) + "…" : value;
   const prefix = type === "link" ? "🔗" : "📝";
   return `${prefix} ${short}`;
+}
+
+function isLikelyUrl(v) {
+  return /^https?:\/\/\S+/i.test(v || "");
 }
 
 export function AppShell({
@@ -56,7 +72,7 @@ export function AppShell({
   statusText,
   state,
   onChangeTopic,
-  onChangeAudience, // NOVO ✅
+  onChangeAudience, // ✅
   onChangePlatform,
   onChangeFormat,
   onChangeCharacteristic,
@@ -68,31 +84,47 @@ export function AppShell({
   const platform = state?.platform || "instagram";
   const format = state?.format || "feed";
   const characteristic = state?.characteristic || "educational";
-  const sources = Array.isArray(state?.sources) ? state.sources : [];
-  const audience = state?.audience || ""; // NOVO ✅
-  // Público-alvo (estado local da UI)
-const [audiencePreset, setAudiencePreset] = useState("");
-const [audienceText, setAudienceText] = useState("");
 
-// Público-alvo final (campo livre ganha do preset)
-const audienceFinal =
-  (audienceText || "").trim() ||
-  (audiencePreset || "").trim() ||
-  "";
-
-// Sincroniza com o estado global
-useEffect(() => {
-  if (typeof onChangeAudience === "function") {
-    onChangeAudience(audienceFinal);
-  }
-}, [audienceFinal, onChangeAudience]);
-
+  // fontes podem vir como string[] ou {type,value}[]
+  const rawSources = Array.isArray(state?.sources) ? state.sources : [];
+  const sources = useMemo(() => {
+    return rawSources.map((s) => {
+      if (typeof s === "string") {
+        return { type: isLikelyUrl(s) ? "link" : "text", value: s };
+      }
+      return { type: s?.type || (isLikelyUrl(s?.value) ? "link" : "text"), value: s?.value || "" };
+    });
+  }, [rawSources]);
 
   const canUseSources =
     typeof onAddSource === "function" && typeof onRemoveSource === "function";
 
   const [sourceInput, setSourceInput] = useState("");
   const [sourceHint, setSourceHint] = useState("");
+
+  // ---------- PÚBLICO-ALVO (ÚNICO) ----------
+  const didInitAudienceRef = useRef(false);
+  const [audiencePreset, setAudiencePreset] = useState("");
+  const [audienceText, setAudienceText] = useState("");
+
+  // preenche 1x com o que já veio do state (se existir)
+  useEffect(() => {
+    if (didInitAudienceRef.current) return;
+    const existing = (state?.audience || "").trim();
+    if (existing) setAudienceText(existing);
+    didInitAudienceRef.current = true;
+  }, [state?.audience]);
+
+  const audienceFinal = useMemo(() => {
+    return (audienceText || "").trim() || (audiencePreset || "").trim() || "";
+  }, [audienceText, audiencePreset]);
+
+  useEffect(() => {
+    if (typeof onChangeAudience === "function") {
+      onChangeAudience(audienceFinal);
+    }
+  }, [audienceFinal, onChangeAudience]);
+  // -----------------------------------------
 
   const sourcesCountText = useMemo(() => {
     const n = sources.length || 0;
@@ -139,6 +171,7 @@ useEffect(() => {
       return;
     }
 
+    // mantém compatibilidade: manda string pro handler e deixa o pai decidir como armazenar
     onAddSource(trimmed);
     setSourceInput("");
     setSourceHint("Fonte adicionada ✅");
@@ -185,25 +218,53 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* PÚBLICO-ALVO ✅ */}
+        {/* PÚBLICO-ALVO (ÚNICO) ✅ */}
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: "#444", marginBottom: 6 }}>
-            Pra quem é esse conteúdo? (público-alvo)
+            Com quem esse conteúdo vai falar? (público-alvo)
           </div>
-          <input
-            value={audience}
-            onChange={(e) => onChangeAudience?.(e.target.value)}
-            placeholder="Ex: iniciantes em cripto / founders SaaS / designers / mães de primeira viagem…"
-            style={{
-              width: "100%",
-              padding: 12,
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              outline: "none",
-            }}
-          />
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <select
+              value={audiencePreset}
+              onChange={(e) => setAudiencePreset(e.target.value)}
+              style={{
+                width: "100%",
+                padding: 12,
+                borderRadius: 10,
+                border: "1px solid #ddd",
+                outline: "none",
+                background: "#fff",
+                fontWeight: 700,
+              }}
+            >
+              {AUDIENCE_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+
+            <input
+              value={audienceText}
+              onChange={(e) => setAudienceText(e.target.value)}
+              placeholder='Ou escreva algo específico (ex: "donas de loja de roupa no Instagram")'
+              style={{
+                width: "100%",
+                padding: 12,
+                borderRadius: 10,
+                border: "1px solid #ddd",
+                outline: "none",
+              }}
+            />
+          </div>
+
           <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
-            Dica: descreve o <b>nível</b> e o <b>contexto</b> (ex: “iniciante total”, “avançado”, “já vende online”).
+            Dica: quanto mais específico, mais a IA acerta o vocabulário, exemplos e ganchos.
+          </div>
+
+          <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+            Selecionado: <b>{audienceFinal || "—"}</b>
           </div>
         </div>
 
@@ -304,63 +365,7 @@ useEffect(() => {
             </div>
           ) : null}
         </div>
-{/* PÚBLICO-ALVO */}
-<div style={{ marginBottom: 12 }}>
-  <div style={{ fontSize: 13, color: "#444", marginBottom: 6 }}>
-    Com quem esse conteúdo vai falar? (público-alvo)
-  </div>
 
-  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-    <select
-      value={audiencePreset}
-      onChange={(e) => setAudiencePreset(e.target.value)}
-      style={{
-        width: "100%",
-        padding: 12,
-        borderRadius: 10,
-        border: "1px solid #ddd",
-        outline: "none",
-        background: "#fff",
-        fontWeight: 700,
-      }}
-    >
-      <option value="">Escolha um público (opcional)</option>
-      <option value="criadores iniciantes">Criadores iniciantes</option>
-      <option value="criadores avançados">Criadores avançados</option>
-      <option value="social media / agência">Social media / agência</option>
-      <option value="founders / builders">Founders / builders</option>
-      <option value="marketing B2B">Marketing B2B</option>
-      <option value="marketing B2C">Marketing B2C</option>
-      <option value="web3 / cripto">Web3 / cripto</option>
-      <option value="devs / produto">Devs / produto</option>
-      <option value="público geral">Público geral</option>
-    </select>
-
-    <input
-      value={audienceText}
-      onChange={(e) => setAudienceText(e.target.value)}
-      placeholder='Ou escreva algo específico (ex: "donas de loja de roupa no Instagram")'
-      style={{
-        width: "100%",
-        padding: 12,
-        borderRadius: 10,
-        border: "1px solid #ddd",
-        outline: "none",
-      }}
-    />
-  </div>
-
-  <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
-    Dica: quanto mais específico, mais a IA acerta o vocabulário, exemplos e ganchos.
-  </div>
-
-  <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
-    Selecionado:{" "}
-    <b>{(audienceText || "").trim() || audiencePreset || "—"}</b>
-  </div>
-</div>
-
-        
         {/* QUAL O TOM (PERSONALIDADE) */}
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: "#444", marginBottom: 6 }}>
@@ -576,6 +581,15 @@ useEffect(() => {
                 <div style={{ color: "#666", fontSize: 13, marginTop: 6 }}>
                   {generated.designElements?.visualConcept}
                 </div>
+              </div>
+
+              <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+                Meta do conteúdo: <b>{CharacteristicLabel(characteristic)}</b>
+                {audienceFinal ? (
+                  <>
+                    {" "}• Público: <b>{audienceFinal}</b>
+                  </>
+                ) : null}
               </div>
             </div>
           )}
