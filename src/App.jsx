@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { AppShell } from "./components/AppShell";
 import { useCreateContent } from "./state/useCreateContent";
-import { generateFakeContent } from "./generators/fakeContentGenerator";
 
 export default function App() {
   const {
@@ -23,19 +22,38 @@ export default function App() {
     return `Pronto pra gerar: ${state.topic}`;
   }, [state?.topic]);
 
-  function handleGenerate() {
-    const content = generateFakeContent({
-      topic: state.topic,
-      audience: state.audience,
-      ctaDesired: state.cta, // ✅ NOVO (não quebra se o gerador ignorar)
-      platform: state.platform,
-      format: state.format,
-      characteristic: state.characteristic,
-      sources: state.sources,
+  async function handleGenerate() {
+  try {
+    setGenerated(null);
+
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topic: state.topic,
+        audience: state.audience,
+        ctaDesired: state.cta,
+        platform: state.platform,
+        format: state.format,
+        characteristic: state.characteristic,
+        sources: state.sources,
+      }),
     });
 
-    setGenerated(content);
+    const data = await res.json();
+
+    if (!res.ok) {
+      console.error("API error:", data);
+      alert(data?.error || "Erro ao gerar conteúdo");
+      return;
+    }
+
+    setGenerated(data);
+  } catch (err) {
+    console.error(err);
+    alert("Falha ao chamar a API");
   }
+}
 
   return (
     <AppShell
