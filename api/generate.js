@@ -9,10 +9,28 @@ function sourcesToText(sources) {
     .map((s, i) => {
       const value = typeof s === "string" ? s : s?.value;
       const type = typeof s === "string" ? "text" : s?.type || "text";
+      if (!value) return null;
       return `${i + 1}. (${type}) ${value}`;
     })
     .filter(Boolean)
     .join("\n");
+}
+
+async function readJsonBody(req) {
+  // tenta usar req.body (quando o runtime já parseou)
+  if (req.body && typeof req.body === "object") return req.body;
+
+  // se veio string
+  if (typeof req.body === "string") {
+    try { return JSON.parse(req.body); } catch { return {}; }
+  }
+
+  // fallback: lê o stream
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const raw = Buffer.concat(chunks).toString("utf8");
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch { return {}; }
 }
 
 export default async function handler(req, res) {
@@ -21,6 +39,8 @@ export default async function handler(req, res) {
   }
 
   try {
+    const body = await readJsonBody(req);
+
     const {
       topic = "",
       audience = "",
@@ -29,11 +49,20 @@ export default async function handler(req, res) {
       format = "feed",
       characteristic = "educational",
       sources = [],
-    } = req.body || {};
+    } = body || {};
 
     const safeTopic = String(topic || "").trim();
     if (!safeTopic) {
       return res.status(400).json({ error: "topic é obrigatório" });
+    }
+
+    // Debug sem vazar segredo
+    const hasKey = Boolean(process.env.OPENAI_API_KEY);
+    if (!hasKey) {
+      return res.status(500).json({
+        error: "OPENAI_API_KEY não encontrada no ambiente",
+        detail: "Verifique as Environment Variables do projeto correto no Vercel e faça um redeploy.",
+      });
     }
 
     const schema = {
@@ -82,11 +111,12 @@ Regras:
 - Se a fonte for um link, trate como referência e não invente conteúdo específico do link.
 - Hashtags: 6 a 12, sem # no texto (apenas as palavras).
 - Headline curta (<= 50 caracteres).
-`;
+`.trim();
 
-    // Responses API + Structured Outputs (schema)
+    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
     const response = await openai.responses.create({
-      model: "gpt-4o-mini",
+      model,
       input: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -101,13 +131,12 @@ Regras:
       },
     });
 
-    // Quando usa structured output, a resposta vem como texto JSON
     const jsonText = response.output_text;
     const parsed = JSON.parse(jsonText);
 
     return res.status(200).json(parsed);
   } catch (err) {
-    console.error(err);
+    console.error("generate error:", err);
     return res.status(500).json({
       error: "Falha ao gerar conteúdo",
       detail: String(err?.message || err),
