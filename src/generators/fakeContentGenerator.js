@@ -80,7 +80,7 @@ function audienceTone(audience) {
 
   const beginnerHints = ["iniciante", "começando", "do zero", "leigo", "primeira vez"];
   const advancedHints = ["avançado", "pro", "experiente", "sênior", "deep", "técnico", "power user"];
-  const founderHints = ["founder", "empreendedor", "saaS", "startup", "indie", "maker", "dev"];
+  const founderHints = ["founder", "empreendedor", "saas", "startup", "indie", "maker", "dev"];
   const creatorHints = ["creator", "criador", "influencer", "ugc", "tiktok", "instagram", "youtuber"];
   const b2bHints = ["b2b", "empresa", "time", "marketing", "vendas", "produto"];
 
@@ -120,12 +120,14 @@ function summarizeSources(sources) {
 }
 
 function bestTimeFor(platform) {
+  // FREE: heurística simples
   if (platform === "twitter") return "8h–10h ou 18h–20h";
   if (platform === "linkedin") return "12h–14h";
   return "18h–21h";
 }
 
 function expectedMetricsFor(platform, characteristic) {
+  // FREE: heurística simples
   if (platform === "twitter" && characteristic === "controversial") {
     return { engagement: "alto", reach: "alto (se a resposta vier rápido)" };
   }
@@ -135,18 +137,49 @@ function expectedMetricsFor(platform, characteristic) {
   return { engagement: "médio", reach: "médio-alto" };
 }
 
-function buildCopy({ topic, audience, platform, format, characteristic, sources }) {
+// PRO (premium): insight extra pra vender depois
+function premiumInsights({ topic, audience, ctaDesired, platform, format, characteristic, sources }) {
+  const hasSources = Array.isArray(sources) && sources.length > 0;
+  const hasAudience = (audience || "").trim().length > 0;
+  const hasCta = (ctaDesired || "").trim().length > 0;
+
+  const bullets = [];
+
+  bullets.push(
+    `Ângulo recomendado: "${characteristicProfile(characteristic).hook} ${topic}" + 1 contraste (antes/depois ou mito/verdade).`
+  );
+
+  if (hasAudience) {
+    bullets.push(`Vocabulário: use exemplos do contexto de "${audience.trim()}" e evite generalizações.`);
+  } else {
+    bullets.push(`Vocabulário: escolha 1 persona (iniciante/avançado/b2b) pra não diluir o post.`);
+  }
+
+  if (hasCta) {
+    bullets.push(`CTA estratégico: encaixar "${ctaDesired.trim()}" como “próximo passo” (última linha + reforço na metade).`);
+  } else {
+    bullets.push(`CTA estratégico: 1 ação só (salvar/baixar/comentar) — CTA fraco mata conversão.`);
+  }
+
+  if (hasSources) {
+    bullets.push(`Prova/credibilidade: cite 1 dado/trecho da base e transforme em “exemplo concreto”.`);
+  } else {
+    bullets.push(`Prova/credibilidade: adicione 1 evidência (dado, print, mini-caso) pra evitar parecer opinião vazia.`);
+  }
+
+  // Esse bloco é o “3” premium
+  return bullets;
+}
+
+function buildCopy({ topic, audience, platform, format, characteristic, sources, ctaFinal }) {
   const profile = characteristicProfile(characteristic);
   const aud = audienceTone(audience);
   const baseLine = summarizeSources(sources);
 
-  const whoLine = audience?.trim()
-    ? `🎯 Público-alvo: ${audience.trim()} ${aud.note}`.trim()
-    : "";
-
   // THREAD (twitter)
   if (platform === "twitter" && format === "thread") {
     const intro = `1/ ${profile.hook} **${topic}**.\n${aud.prefix}${aud.note}`.trim();
+
     const body = [
       `2/ Contexto rápido: por que isso importa agora? Porque atenção é escassa e distribuição muda toda semana.`,
       `3/ ✅ O que muda na prática:\n- o que você faz amanhã?\n- qual métrica acompanha?\n- qual promessa você evita?`,
@@ -156,7 +189,7 @@ function buildCopy({ topic, audience, platform, format, characteristic, sources 
         ? `6/ Ajuste fino pra ${audience.trim()}:\n- exemplo mais próximo do seu contexto\n- vocabulário: ${aud.vocabulary}\n- CTA alinhado ao momento`
         : `6/ Ajuste fino: troque o exemplo e o CTA pro seu contexto.`,
       baseLine ? `7/ ${baseLine}` : null,
-      `8/ ${profile.cta}`,
+      `8/ ${ctaFinal}`,
     ].filter(Boolean);
 
     return `${intro}\n\n${body.join("\n\n")}`;
@@ -169,7 +202,7 @@ function buildCopy({ topic, audience, platform, format, characteristic, sources 
       ? `Pra ${audience.trim()}, o erro nº1 é tentar parecer “expert” cedo demais.`
       : `O erro nº1 é tentar ser genérico pra todo mundo.`;
     const line3 = `Faz isso: 1) hook claro 2) 1 prova/contraste 3) 1 próximo passo.`;
-    const line4 = profile.cta;
+    const line4 = ctaFinal;
     const extra = baseLine ? `\n\n${baseLine}` : "";
     return `${line1}\n\n${line2}\n${line3}\n\n${line4}${extra}`;
   }
@@ -184,7 +217,7 @@ function buildCopy({ topic, audience, platform, format, characteristic, sources 
     `✅ 1 erro comum que derruba alcance.`,
     `✅ 1 passo prático pra hoje.`,
     baseLine ? `📚 ${baseLine}` : null,
-    `👉 ${profile.cta}`,
+    `👉 ${ctaFinal}`,
   ].filter(Boolean);
 
   return `${opening}\n\n${bullets.join("\n")}`;
@@ -203,8 +236,7 @@ function buildTitle({ topic, audience, characteristic, platform, format }) {
 function buildDesignElements({ topic, audience, characteristic, platform, format }) {
   const profile = characteristicProfile(characteristic);
 
-  const headline =
-    topic.length > 42 ? topic.slice(0, 42).trim() + "…" : topic;
+  const headline = topic.length > 42 ? topic.slice(0, 42).trim() + "…" : topic;
 
   const sub =
     audience?.trim()
@@ -223,6 +255,8 @@ function buildDesignElements({ topic, audience, characteristic, platform, format
 export function generateFakeContent({
   topic,
   audience,
+  ctaDesired, // ✅ NOVO
+  plan = "free", // ✅ NOVO: "free" | "pro"
   platform = "instagram",
   format = "feed",
   characteristic = "educational",
@@ -235,31 +269,43 @@ export function generateFakeContent({
       copy: "",
       hashtags: [],
       cta: "",
+      ctaDesired: ctaDesired || "",
       designElements: { headline: "Headline", subheadline: "Subheadline" },
       bestTime: bestTimeFor(platform),
       expectedMetrics: expectedMetricsFor(platform, characteristic),
+      insightsPremium: null,
     };
   }
 
   const profile = characteristicProfile(characteristic);
 
+  // ✅ CTA: desejado manda, senão cai no profile
+  const ctaFinal = String(ctaDesired || "").trim() || profile.cta;
+
   const title = buildTitle({ topic: safeTopic, audience, characteristic, platform, format });
-  const copy = buildCopy({ topic: safeTopic, audience, platform, format, characteristic, sources });
+  const copy = buildCopy({ topic: safeTopic, audience, platform, format, characteristic, sources, ctaFinal });
 
   const hashtags = profile.hashtags;
-
-  // CTA já vem do profile, mas mantém campo separado pro AppShell
-  const cta = profile.cta;
-
   const designElements = buildDesignElements({ topic: safeTopic, audience, characteristic, platform, format });
+
+  const bestTime = bestTimeFor(platform); // 1) FREE
+  const expectedMetrics = expectedMetricsFor(platform, characteristic); // 2) FREE
+
+  // 3) PREMIUM
+  const insightsPremium =
+    plan === "pro"
+      ? premiumInsights({ topic: safeTopic, audience, ctaDesired, platform, format, characteristic, sources })
+      : null;
 
   return {
     title,
     copy,
     hashtags,
-    cta,
+    cta: ctaFinal,
+    ctaDesired: String(ctaDesired || "").trim(),
     designElements,
-    bestTime: bestTimeFor(platform),
-    expectedMetrics: expectedMetricsFor(platform, characteristic),
+    bestTime,
+    expectedMetrics,
+    insightsPremium,
   };
 }
