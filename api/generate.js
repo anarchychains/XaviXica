@@ -20,27 +20,34 @@ async function readJsonBody(req) {
   if (req.body && typeof req.body === "object") return req.body;
 
   if (typeof req.body === "string") {
-    try { return JSON.parse(req.body); } catch { return {}; }
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      return {};
+    }
   }
 
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   const raw = Buffer.concat(chunks).toString("utf8");
   if (!raw) return {};
-  try { return JSON.parse(raw); } catch { return {}; }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
 }
 
-/**
- * Pequena pausa (ms)
- */
+/** Pequena pausa (ms) */
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
- * Decide se vale retry e quanto esperar.
+ * Decide se vale retry.
  * - 429 por rate limit → retry
  * - 429 por billing/quota → NÃO retry
+ * - 5xx → retry
  */
 function classifyOpenAIError(err) {
   const status = err?.status || err?.response?.status;
@@ -48,13 +55,22 @@ function classifyOpenAIError(err) {
   const message = String(err?.message || "");
 
   const is429 = status === 429;
+
+  // rate limit pode vir com códigos diferentes ou só no texto
   const isRateLimit =
-    is429 && (code === "rate_limit_exceeded" || /rate limit/i.test(message));
+    is429 &&
+    (code === "rate_limit_exceeded" ||
+      code === "rate_limited" ||
+      /rate limit/i.test(message) ||
+      /too many requests/i.test(message));
 
   const isQuotaOrBilling =
-    is429 && (code === "insufficient_quota" || /insufficient_quota/i.test(message) || /billing/i.test(message));
+    is429 &&
+    (code === "insufficient_quota" ||
+      /insufficient_quota/i.test(message) ||
+      /billing/i.test(message) ||
+      /quota/i.test(message));
 
-  // fallback: 5xx temporários também podem valer retry
   const is5xx = status >= 500 && status <= 599;
 
   return {
@@ -74,9 +90,7 @@ function classifyOpenAIError(err) {
   };
 }
 
-/**
- * Faz a chamada ao OpenAI com retry (quando fizer sentido).
- */
+/** Chama OpenAI com retry (quando fizer sentido) */
 async function createResponseWithRetry(payload, { maxRetries = 3 } = {}) {
   let attempt = 0;
 
@@ -87,23 +101,21 @@ async function createResponseWithRetry(payload, { maxRetries = 3 } = {}) {
       const info = classifyOpenAIError(err);
       attempt += 1;
 
-      // Se for quota/billing: nem tenta de novo
+      // quota/billing: não adianta insistir
       if (info.isQuotaOrBilling) throw err;
 
-      // Se não for retryable ou estourou tentativas: desiste
       if (!info.isRetryable || attempt > maxRetries) throw err;
 
-      // Exponential backoff com “jitter” (aleatoriezinho)
+      // Exponential backoff + jitter
       const base = 500; // 0.5s
       const wait = base * Math.pow(2, attempt - 1);
-      const jitter = Math.floor(Math.random() * 250); // até 250ms
+      const jitter = Math.floor(Math.random() * 250);
       await sleep(wait + jitter);
     }
   }
 }
 
 export default async function handler(req, res) {
-  // Dica: ajuda debug e suporte
   const traceId =
     req.headers["x-vercel-id"] ||
     req.headers["x-request-id"] ||
@@ -112,6 +124,9 @@ export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Use POST", traceId });
   }
+
+  // cronômetro total da requisição
+  const startedAt = Date.now();
 
   try {
     const body = await readJsonBody(req);
@@ -135,7 +150,8 @@ export default async function handler(req, res) {
     if (!hasKey) {
       return res.status(500).json({
         error: "OPENAI_API_KEY não encontrada no ambiente",
-        detail: "Verifique as Environment Variables do projeto correto no Vercel e faça um redeploy.",
+        detail:
+          "Verifique as Environment Variables do projeto correto no Vercel e faça um redeploy.",
         traceId,
       });
     }
@@ -177,7 +193,10 @@ FORMATO: ${format}
 TOM/PERFIL: ${characteristic}
 
 PÚBLICO-ALVO: ${String(audience || "").trim() || "(não informado)"}
-CTA DESEJADO: ${String(ctaDesired || "").trim() || "(não informado — proponha um CTA apropriado)"}
+CTA DESEJADO: ${
+      String(ctaDesired || "").trim() ||
+      "(não informado — proponha um CTA apropriado)"
+    }
 
 FONTES (use como base, não invente dado factual):
 ${sourcesToText(sources)}
@@ -196,7 +215,6 @@ Regras:
         { role: "system", content: system },
         { role: "user", content: user },
       ],
-      // ✅ Limita o tamanho da resposta (mais estável)
       max_output_tokens: 700,
       text: {
         format: {
@@ -208,7 +226,40 @@ Regras:
       },
     };
 
+    // cronômetro só da OpenAI
+    const openaiStartedAt = Date.now();
+
     const response = await createResponseWithRetry(payload, { maxRetries: 3 });
+
+    const openaiMs = Date.now() - openaiStartedAt;
+
+    // ===== RELÓGIO INVISÍVEL (tokens + custo) =====
+    const usage = response?.usage || {};
+    const inputTokens = usage.input_tokens || 0;
+    const outputTokens = usage.output_tokens || 0;
+
+    // preços do gpt-4o-mini (USD por 1 milhão de tokens)
+    const PRICE_INPUT_PER_1M = 0.15;
+    const PRICE_OUTPUT_PER_1M = 0.60;
+
+    const costUSD =
+      (inputTokens / 1_000_000) * PRICE_INPUT_PER_1M +
+      (outputTokens / 1_000_000) * PRICE_OUTPUT_PER_1M;
+
+    console.log("[COST]", {
+      traceId,
+      model,
+      inputTokens,
+      outputTokens,
+      costUSD: Number(costUSD.toFixed(6)),
+    });
+
+    console.log("[PERF]", {
+      traceId,
+      openaiMs,
+      totalMs: Date.now() - startedAt,
+    });
+    // ============================================
 
     const jsonText = response.output_text;
 
@@ -216,7 +267,6 @@ Regras:
     try {
       parsed = JSON.parse(jsonText);
     } catch (e) {
-      // Se por algum motivo raro vier algo inválido, devolve erro “explicável”
       return res.status(502).json({
         error: "A IA retornou um JSON inválido (raro).",
         detail: "Tente novamente. Se persistir, revise o prompt/schema.",
@@ -235,7 +285,6 @@ Regras:
       message: info.message,
     });
 
-    // ✅ Erros que a UI consegue tratar bonitinho
     if (info.publicCode === "insufficient_quota") {
       return res.status(429).json({
         error: "Limite de uso/billing atingido na OpenAI.",
