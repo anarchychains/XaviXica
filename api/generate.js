@@ -2,18 +2,55 @@ import OpenAI from "openai";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-function sourcesToText(sources) {
+/** Helpers */
+function isProbablyUrl(str) {
+  if (!str) return false;
+  const s = String(str).trim();
+  return /^https?:\/\/\S+/i.test(s);
+}
+
+function normalizeSources(sources) {
   const arr = Array.isArray(sources) ? sources : [];
+  return arr
+    .map((s, idx) => {
+      if (typeof s === "string") {
+        return { id: idx + 1, type: isProbablyUrl(s) ? "link" : "text", value: s };
+      }
+      const value = s?.value ?? "";
+      const typeRaw = s?.type ?? "";
+      const type =
+        typeRaw === "link" || typeRaw === "url"
+          ? "link"
+          : typeRaw === "text"
+          ? "text"
+          : isProbablyUrl(value)
+          ? "link"
+          : "text";
+      return { id: idx + 1, type, value };
+    })
+    .filter((s) => String(s.value || "").trim().length > 0);
+}
+
+function sourcesToText(sources) {
+  const arr = normalizeSources(sources);
   if (!arr.length) return "Sem fontes.";
   return arr
-    .map((s, i) => {
-      const value = typeof s === "string" ? s : s?.value;
-      const type = typeof s === "string" ? "text" : s?.type || "text";
-      if (!value) return null;
-      return `${i + 1}. (${type}) ${value}`;
-    })
-    .filter(Boolean)
+    .map((s) => `${s.id}. (${s.type}) ${s.value}`)
     .join("\n");
+}
+
+function hasReadableSourceText(sources) {
+  const arr = normalizeSources(sources);
+  // Consideramos "legível" se existir pelo menos uma fonte do tipo text com conteúdo.
+  return arr.some((s) => s.type === "text" && String(s.value).trim().length >= 40);
+}
+
+function hasOnlyLinksOrTinyText(sources) {
+  const arr = normalizeSources(sources);
+  if (!arr.length) return false;
+  const hasText = arr.some((s) => s.type === "text" && String(s.value).trim().length >= 40);
+  const hasLinks = arr.some((s) => s.type === "link");
+  return hasLinks && !hasText;
 }
 
 async function readJsonBody(req) {
@@ -56,7 +93,6 @@ function classifyOpenAIError(err) {
 
   const is429 = status === 429;
 
-  // rate limit pode vir com códigos diferentes ou só no texto
   const isRateLimit =
     is429 &&
     (code === "rate_limit_exceeded" ||
@@ -101,18 +137,255 @@ async function createResponseWithRetry(payload, { maxRetries = 3 } = {}) {
       const info = classifyOpenAIError(err);
       attempt += 1;
 
-      // quota/billing: não adianta insistir
       if (info.isQuotaOrBilling) throw err;
-
       if (!info.isRetryable || attempt > maxRetries) throw err;
 
-      // Exponential backoff + jitter
-      const base = 500; // 0.5s
+      const base = 500;
       const wait = base * Math.pow(2, attempt - 1);
       const jitter = Math.floor(Math.random() * 250);
       await sleep(wait + jitter);
     }
   }
+}
+
+/** Custo invisível */
+function logCostAndPerf({ traceId, model, response, startedAt, openaiStartedAt, phase }) {
+  const openaiMs = Date.now() - openaiStartedAt;
+  const usage = response?.usage || {};
+  const inputTokens = usage.input_tokens || 0;
+  const outputTokens = usage.output_tokens || 0;
+
+  // gpt-4o-mini (USD por 1 milhão de tokens)
+  const PRICE_INPUT_PER_1M = 0.15;
+  const PRICE_OUTPUT_PER_1M = 0.60;
+
+  const costUSD =
+    (inputTokens / 1_000_000) * PRICE_INPUT_PER_1M +
+    (outputTokens / 1_000_000) * PRICE_OUTPUT_PER_1M;
+
+  console.log("[COST]", {
+    traceId,
+    phase,
+    model,
+    inputTokens,
+    outputTokens,
+    costUSD: Number(costUSD.toFixed(6)),
+  });
+
+  console.log("[PERF]", {
+    traceId,
+    phase,
+    openaiMs,
+    totalMs: Date.now() - startedAt,
+  });
+}
+
+/** Schemas */
+function getPlanSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      kind: { type: "string", enum: ["plan"] },
+      sourceReadiness: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          sourcesProvided: { type: "boolean" },
+          canReliablyUseSources: { type: "boolean" },
+          messageToUser: { type: "string" },
+          missingSourceText: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                sourceId: { type: "number" },
+                reason: { type: "string" },
+                whatToPaste: { type: "string" },
+              },
+              required: ["sourceId", "reason", "whatToPaste"],
+            },
+          },
+        },
+        required: ["sourcesProvided", "canReliablyUseSources", "messageToUser", "missingSourceText"],
+      },
+      whatIGot: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          topicUnderstanding: { type: "string" },
+          audienceUnderstanding: { type: "string" },
+          ctaUnderstanding: { type: "string" },
+          toneUnderstanding: { type: "string" },
+          platformUnderstanding: { type: "string" },
+          formatUnderstanding: { type: "string" },
+        },
+        required: [
+          "topicUnderstanding",
+          "audienceUnderstanding",
+          "ctaUnderstanding",
+          "toneUnderstanding",
+          "platformUnderstanding",
+          "formatUnderstanding",
+        ],
+      },
+      editorialOptions: {
+        type: "array",
+        minItems: 3,
+        maxItems: 3,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            optionId: { type: "string", enum: ["A", "B", "C"] },
+            label: { type: "string" },
+            editorialAngle: { type: "string" },
+            tone: { type: "string" },
+            focus: { type: "string" },
+            howSourcesAreUsed: { type: "string" },
+            expectedReaction: { type: "string" },
+            ctaSuggestion: { type: "string" },
+          },
+          required: [
+            "optionId",
+            "label",
+            "editorialAngle",
+            "tone",
+            "focus",
+            "howSourcesAreUsed",
+            "expectedReaction",
+            "ctaSuggestion",
+          ],
+        },
+      },
+    },
+    required: ["kind", "sourceReadiness", "whatIGot", "editorialOptions"],
+  };
+}
+
+function getContentSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      kind: { type: "string", enum: ["content"] },
+      title: { type: "string" },
+      copy: { type: "string" },
+      hashtags: { type: "array", items: { type: "string" } },
+      cta: { type: "string" },
+      designElements: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          headline: { type: "string" },
+          subheadline: { type: "string" },
+          layout: { type: "string" },
+          visualConcept: { type: "string" },
+        },
+        required: ["headline", "subheadline", "layout", "visualConcept"],
+      },
+    },
+    required: ["kind", "title", "copy", "hashtags", "cta", "designElements"],
+  };
+}
+
+/** Prompts */
+function buildPlanPrompt({
+  topic,
+  audience,
+  ctaDesired,
+  platform,
+  format,
+  characteristic,
+  sources,
+  canReliablyUseSources,
+}) {
+  const sourcesText = sourcesToText(sources);
+
+  const system = [
+    "Você é um editor-chefe e estrategista de conteúdo.",
+    "Sua tarefa nesta fase é PROPOR DIRECIONAMENTO, não escrever o post final.",
+    "Você deve respeitar as fontes fornecidas. Se a fonte não estiver legível (ex: apenas link), não invente conteúdo do link.",
+    "Retorne APENAS JSON válido no schema solicitado.",
+  ].join(" ");
+
+  const user = `
+FASE: PLAN (propor 3 opções A/B/C)
+
+TEMA: ${String(topic).trim()}
+PLATAFORMA: ${platform}
+FORMATO: ${format}
+TOM/PERFIL: ${characteristic}
+
+PÚBLICO-ALVO: ${String(audience || "").trim() || "(não informado)"}
+CTA DESEJADO: ${String(ctaDesired || "").trim() || "(não informado)"}
+
+FONTES:
+${sourcesText}
+
+SINAL DO SISTEMA:
+- canReliablyUseSources = ${canReliablyUseSources ? "true" : "false"}
+
+Regras importantes:
+- Se canReliablyUseSources = false, diga ao usuário: "Para garantir precisão, cole o trecho principal da fonte."
+- NUNCA invente conteúdo específico de links.
+- Mesmo sem fontes legíveis, você pode sugerir 3 caminhos editoriais com base no tema, plataforma, formato, público e tom.
+- As 3 opções devem ser bem diferentes entre si.
+- As opções devem deixar claro COMO as fontes seriam usadas quando estiverem legíveis (ou que precisam de texto colado).
+`.trim();
+
+  return { system, user };
+}
+
+function buildGeneratePrompt({
+  topic,
+  audience,
+  ctaDesired,
+  platform,
+  format,
+  characteristic,
+  sources,
+  selectedOption,
+  customDirection,
+}) {
+  const sourcesText = sourcesToText(sources);
+
+  const system = [
+    "Você é um agente de criação de conteúdo com rigor editorial.",
+    "Respeite plataforma e formato. Gere conteúdo direto, útil, com boa cadência e sem enrolação.",
+    "Se fontes legíveis foram fornecidas (texto colado), use-as como base factual. Não invente fatos.",
+    "Se houver conflito entre fontes, deixe isso explícito (sem forçar consenso).",
+    "Sempre retorne APENAS JSON válido no schema pedido.",
+  ].join(" ");
+
+  const directionBlock = customDirection
+    ? `DIRECIONAMENTO ESCOLHIDO PELO USUÁRIO (override):\n${String(customDirection).trim()}`
+    : `DIRECIONAMENTO ESCOLHIDO (A/B/C):\n${String(selectedOption || "").trim()}`;
+
+  const user = `
+FASE: GENERATE (gerar conteúdo final)
+
+TEMA: ${String(topic).trim()}
+PLATAFORMA: ${platform}
+FORMATO: ${format}
+TOM/PERFIL: ${characteristic}
+
+PÚBLICO-ALVO: ${String(audience || "").trim() || "(não informado)"}
+CTA DESEJADO: ${String(ctaDesired || "").trim() || "(não informado — proponha um CTA apropriado)"}
+
+${directionBlock}
+
+FONTES (use como base, não invente dado factual):
+${sourcesText}
+
+Regras:
+- Se a fonte for um link, trate como referência e não invente conteúdo específico do link.
+- Hashtags: 6 a 12, sem # no texto (apenas as palavras).
+- Headline curta (<= 50 caracteres).
+`.trim();
+
+  return { system, user };
 }
 
 export default async function handler(req, res) {
@@ -125,13 +398,13 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Use POST", traceId });
   }
 
-  // cronômetro total da requisição
   const startedAt = Date.now();
 
   try {
     const body = await readJsonBody(req);
 
     const {
+      phase = "generate", // "plan" | "generate"
       topic = "",
       audience = "",
       ctaDesired = "",
@@ -139,6 +412,9 @@ export default async function handler(req, res) {
       format = "feed",
       characteristic = "educational",
       sources = [],
+      selectedOptionId, // "A" | "B" | "C"
+      selectedOptionText, // opcional: texto da opção (se vc quiser mandar do front)
+      customDirection, // opcional: override manual
     } = body || {};
 
     const safeTopic = String(topic || "").trim();
@@ -150,131 +426,183 @@ export default async function handler(req, res) {
     if (!hasKey) {
       return res.status(500).json({
         error: "OPENAI_API_KEY não encontrada no ambiente",
-        detail:
-          "Verifique as Environment Variables do projeto correto no Vercel e faça um redeploy.",
+        detail: "Verifique as Environment Variables do projeto correto no Vercel e faça um redeploy.",
         traceId,
       });
     }
-
-    const schema = {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        title: { type: "string" },
-        copy: { type: "string" },
-        hashtags: { type: "array", items: { type: "string" } },
-        cta: { type: "string" },
-        designElements: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            headline: { type: "string" },
-            subheadline: { type: "string" },
-            layout: { type: "string" },
-            visualConcept: { type: "string" },
-          },
-          required: ["headline", "subheadline", "layout", "visualConcept"],
-        },
-      },
-      required: ["title", "copy", "hashtags", "cta", "designElements"],
-    };
-
-    const system = [
-      "Você é um agente de criação de conteúdo.",
-      "Gere conteúdo direto, útil, com boa cadência e sem enrolação.",
-      "Respeite plataforma e formato.",
-      "Sempre retorne APENAS JSON válido no schema pedido.",
-    ].join(" ");
-
-    const user = `
-TEMA: ${safeTopic}
-PLATAFORMA: ${platform}
-FORMATO: ${format}
-TOM/PERFIL: ${characteristic}
-
-PÚBLICO-ALVO: ${String(audience || "").trim() || "(não informado)"}
-CTA DESEJADO: ${
-      String(ctaDesired || "").trim() ||
-      "(não informado — proponha um CTA apropriado)"
-    }
-
-FONTES (use como base, não invente dado factual):
-${sourcesToText(sources)}
-
-Regras:
-- Se a fonte for um link, trate como referência e não invente conteúdo específico do link.
-- Hashtags: 6 a 12, sem # no texto (apenas as palavras).
-- Headline curta (<= 50 caracteres).
-`.trim();
 
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-    const payload = {
-      model,
-      input: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      max_output_tokens: 700,
-      text: {
-        format: {
-          type: "json_schema",
-          strict: true,
-          name: "content_payload",
-          schema,
-        },
-      },
-    };
+    // Fonte legível: consideramos legível se existir um texto colado minimamente longo
+    const sourcesProvided = normalizeSources(sources).length > 0;
+    const canReliablyUseSources = sourcesProvided ? hasReadableSourceText(sources) : true;
 
-    // cronômetro só da OpenAI
-    const openaiStartedAt = Date.now();
+    // ========== FASE 1: PLAN ==========
+    if (phase === "plan") {
+      const planSchema = getPlanSchema();
 
-    const response = await createResponseWithRetry(payload, { maxRetries: 3 });
+      const missing = [];
+      if (hasOnlyLinksOrTinyText(sources)) {
+        const arr = normalizeSources(sources);
+        for (const s of arr) {
+          if (s.type === "link") {
+            missing.push({
+              sourceId: s.id,
+              reason: "Fonte em link não está legível para análise precisa.",
+              whatToPaste: "Para garantir precisão, cole o trecho principal da fonte.",
+            });
+          }
+        }
+      }
 
-    const openaiMs = Date.now() - openaiStartedAt;
-
-    // ===== RELÓGIO INVISÍVEL (tokens + custo) =====
-    const usage = response?.usage || {};
-    const inputTokens = usage.input_tokens || 0;
-    const outputTokens = usage.output_tokens || 0;
-
-    // preços do gpt-4o-mini (USD por 1 milhão de tokens)
-    const PRICE_INPUT_PER_1M = 0.15;
-    const PRICE_OUTPUT_PER_1M = 0.60;
-
-    const costUSD =
-      (inputTokens / 1_000_000) * PRICE_INPUT_PER_1M +
-      (outputTokens / 1_000_000) * PRICE_OUTPUT_PER_1M;
-
-    console.log("[COST]", {
-      traceId,
-      model,
-      inputTokens,
-      outputTokens,
-      costUSD: Number(costUSD.toFixed(6)),
-    });
-
-    console.log("[PERF]", {
-      traceId,
-      openaiMs,
-      totalMs: Date.now() - startedAt,
-    });
-    // ============================================
-
-    const jsonText = response.output_text;
-
-    let parsed;
-    try {
-      parsed = JSON.parse(jsonText);
-    } catch (e) {
-      return res.status(502).json({
-        error: "A IA retornou um JSON inválido (raro).",
-        detail: "Tente novamente. Se persistir, revise o prompt/schema.",
-        traceId,
+      const { system, user } = buildPlanPrompt({
+        topic: safeTopic,
+        audience,
+        ctaDesired,
+        platform,
+        format,
+        characteristic,
+        sources,
+        canReliablyUseSources,
       });
+
+      const payload = {
+        model,
+        input: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        max_output_tokens: 650,
+        text: {
+          format: {
+            type: "json_schema",
+            strict: true,
+            name: "plan_payload",
+            schema: planSchema,
+          },
+        },
+      };
+
+      const openaiStartedAt = Date.now();
+      const response = await createResponseWithRetry(payload, { maxRetries: 3 });
+      logCostAndPerf({ traceId, model, response, startedAt, openaiStartedAt, phase: "plan" });
+
+      const jsonText = response.output_text;
+
+      let parsed;
+      try {
+        parsed = JSON.parse(jsonText);
+      } catch {
+        return res.status(502).json({
+          error: "A IA retornou um JSON inválido na fase de planejamento.",
+          detail: "Tente novamente. Se persistir, revise o prompt/schema.",
+          traceId,
+        });
+      }
+
+      // Enriquecimento do retorno com informações calculadas no servidor
+      // (não quebra schema do LLM porque isso acontece depois da validação)
+      parsed.sourceReadiness = parsed.sourceReadiness || {};
+      parsed.sourceReadiness.sourcesProvided = Boolean(sourcesProvided);
+      parsed.sourceReadiness.canReliablyUseSources = Boolean(canReliablyUseSources);
+      parsed.sourceReadiness.missingSourceText = missing;
+      parsed.sourceReadiness.messageToUser = canReliablyUseSources
+        ? "Fontes prontas para análise."
+        : "Para garantir precisão, cole o trecho principal da fonte.";
+
+      return res.status(200).json({ ...parsed, traceId });
     }
 
-    return res.status(200).json({ ...parsed, traceId });
+    // ========== FASE 2: GENERATE ==========
+    if (phase === "generate") {
+      // Se o usuário quer precisão via fonte, mas só mandou link, a gente bloqueia.
+      // (Você pode flexibilizar depois, mas isso protege o MVP editorial.)
+      if (sourcesProvided && !canReliablyUseSources) {
+        return res.status(422).json({
+          error: "Fonte não legível para análise precisa.",
+          code: "sources_need_paste",
+          detail: "Para garantir precisão, cole o trecho principal da fonte.",
+          traceId,
+        });
+      }
+
+      const contentSchema = getContentSchema();
+
+      // Monta o direcionamento selecionado
+      let selectedOption = "";
+      if (selectedOptionText && String(selectedOptionText).trim()) {
+        selectedOption = String(selectedOptionText).trim();
+      } else if (selectedOptionId) {
+        selectedOption = `Opção ${selectedOptionId}`;
+      }
+
+      // Regras: precisa escolher opção OU mandar override
+      const hasOverride = Boolean(String(customDirection || "").trim());
+      const hasChoice = Boolean(String(selectedOptionId || "").trim() || String(selectedOptionText || "").trim());
+
+      if (!hasOverride && !hasChoice) {
+        return res.status(400).json({
+          error: "Escolha uma opção (A/B/C) ou escreva um direcionamento (customDirection).",
+          code: "missing_direction",
+          traceId,
+        });
+      }
+
+      const { system, user } = buildGeneratePrompt({
+        topic: safeTopic,
+        audience,
+        ctaDesired,
+        platform,
+        format,
+        characteristic,
+        sources,
+        selectedOption,
+        customDirection,
+      });
+
+      const payload = {
+        model,
+        input: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        max_output_tokens: 900,
+        text: {
+          format: {
+            type: "json_schema",
+            strict: true,
+            name: "content_payload",
+            schema: contentSchema,
+          },
+        },
+      };
+
+      const openaiStartedAt = Date.now();
+      const response = await createResponseWithRetry(payload, { maxRetries: 3 });
+      logCostAndPerf({ traceId, model, response, startedAt, openaiStartedAt, phase: "generate" });
+
+      const jsonText = response.output_text;
+
+      let parsed;
+      try {
+        parsed = JSON.parse(jsonText);
+      } catch {
+        return res.status(502).json({
+          error: "A IA retornou um JSON inválido na fase de geração.",
+          detail: "Tente novamente. Se persistir, revise o prompt/schema.",
+          traceId,
+        });
+      }
+
+      return res.status(200).json({ ...parsed, traceId });
+    }
+
+    // fase desconhecida
+    return res.status(400).json({
+      error: "phase inválida. Use 'plan' ou 'generate'.",
+      code: "invalid_phase",
+      traceId,
+    });
   } catch (err) {
     const info = classifyOpenAIError(err);
 
