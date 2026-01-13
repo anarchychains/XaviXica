@@ -125,6 +125,19 @@ function Notice({ type = "info", children }) {
   );
 }
 
+function isUrl(s) {
+  const raw = (s || "").trim();
+  if (!raw) return false;
+  return /^https?:\/\/\S+/i.test(raw) || /^[a-z0-9.-]+\.[a-z]{2,}\/\S+/i.test(raw);
+}
+
+function normalizeUrl(input) {
+  const raw = (input || "").trim();
+  if (!raw) return "";
+  if (!/^https?:\/\//i.test(raw)) return `https://${raw}`;
+  return raw;
+}
+
 /* ===============================
    MAIN
 ================================ */
@@ -132,31 +145,31 @@ export default function CryptoContentAgent() {
   const [activeTab, setActiveTab] = useState("create");
 
   const [topic, setTopic] = useState("");
+
+  // (mantive sua coleta atual só com o que já existia nesse componente)
   const [platform, setPlatform] = useState("instagram");
   const [format, setFormat] = useState("feed");
   const [characteristic, setCharacteristic] = useState("educational");
 
-  // Fontes: agora suportam link e texto
+  // Fontes: link + texto (opção 1)
   const [sourceInput, setSourceInput] = useState("");
-  const [sources, setSources] = useState([]); // [{ id, type: "link"|"text", value, relatedTo? }]
+  const [sources, setSources] = useState([]); // [{ id, type:"link"|"text", value, relatedTo? }]
 
-  // UI do copy/paste obrigatório quando link
+  // UI de copy/paste obrigatório pro link
   const [needsPaste, setNeedsPaste] = useState(false);
   const [pendingLinkId, setPendingLinkId] = useState(null);
   const [pasteText, setPasteText] = useState("");
-  const [sourceWarning, setSourceWarning] = useState("");
 
-  // Fluxo novo: plan -> escolher -> generate
-  const [stage, setStage] = useState("form"); // "form" | "plan_ready" | "generating" | "done"
-  const [plan, setPlan] = useState(null); // resposta do phase: plan
-  const [selectedOptionId, setSelectedOptionId] = useState(""); // "A"|"B"|"C"
-  const [customDirection, setCustomDirection] = useState(""); // override do usuário
-
-  const [loadingPlan, setLoadingPlan] = useState(false);
-  const [loadingGenerate, setLoadingGenerate] = useState(false);
-  const [apiError, setApiError] = useState("");
+  // Novo fluxo: plan -> choose -> generate
+  const [plan, setPlan] = useState(null);
+  const [selectedOptionId, setSelectedOptionId] = useState("");
+  const [customDirection, setCustomDirection] = useState("");
 
   const [generated, setGenerated] = useState(null);
+
+  const [isPlanning, setIsPlanning] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
 
   const formatsForPlatform = FORMATS_BY_PLATFORM[platform] || [];
   const characteristicObj = CHARACTERISTICS.find((c) => c.id === characteristic);
@@ -187,7 +200,6 @@ export default function CryptoContentAgent() {
         if (typeof data.selectedOptionId === "string") setSelectedOptionId(data.selectedOptionId);
         if (typeof data.customDirection === "string") setCustomDirection(data.customDirection);
         if (data.generated) setGenerated(data.generated);
-        if (typeof data.stage === "string") setStage(data.stage);
       } catch {
         // ignore
       }
@@ -207,10 +219,9 @@ export default function CryptoContentAgent() {
         selectedOptionId,
         customDirection,
         generated,
-        stage,
       })
     );
-  }, [topic, platform, format, characteristic, sources, plan, selectedOptionId, customDirection, generated, stage]);
+  }, [topic, platform, format, characteristic, sources, plan, selectedOptionId, customDirection, generated]);
 
   const copyPayload = useMemo(() => {
     if (!generated) return "";
@@ -218,179 +229,151 @@ export default function CryptoContentAgent() {
     return [generated.title, generated.copy, tags].filter(Boolean).join("\n\n");
   }, [generated]);
 
-  function isUrl(s) {
-    return (
-      /^https?:\/\/\S+/i.test((s || "").trim()) ||
-      /^[a-z0-9.-]+\.[a-z]{2,}\/\S+/i.test((s || "").trim())
-    );
-  }
-
-  function normalizeUrl(input) {
-    const raw = (input || "").trim();
-    if (!raw) return "";
-    if (!/^https?:\/\//i.test(raw)) return `https://${raw}`;
-    return raw;
+  function resetAIOutputs() {
+    setErrorMsg("");
+    setPlan(null);
+    setSelectedOptionId("");
+    setCustomDirection("");
+    setGenerated(null);
   }
 
   function addSource() {
     const raw = (sourceInput || "").trim();
     if (!raw) return;
 
-    // se parece link: adiciona link e já pede o trecho (opção A)
     if (isUrl(raw)) {
       const url = normalizeUrl(raw);
 
-      const exists = sources.some((s) => s.type === "link" && s.value === url);
-      if (exists) {
+      if (sources.some((s) => s.type === "link" && s.value === url)) {
         setSourceInput("");
         return;
       }
 
       const linkId = crypto.randomUUID();
       setSources((prev) => [...prev, { id: linkId, type: "link", value: url }]);
+      setSourceInput("");
 
+      // obriga paste logo na hora (opção 1)
       setNeedsPaste(true);
       setPendingLinkId(linkId);
-      setSourceWarning("Para garantir precisão, cole o trecho principal da fonte.");
       setPasteText("");
-      setSourceInput("");
+
+      resetAIOutputs();
       return;
     }
 
-    // se não for link: trata como texto-base direto
+    // se não é link, tratamos como texto direto
     setSources((prev) => [...prev, { id: crypto.randomUUID(), type: "text", value: raw }]);
     setSourceInput("");
-    setSourceWarning("");
+    resetAIOutputs();
+  }
+
+  function removeSource(id) {
+    setSources((prev) => prev.filter((s) => s.id !== id));
+    if (id === pendingLinkId) {
+      setNeedsPaste(false);
+      setPendingLinkId(null);
+      setPasteText("");
+    }
+    resetAIOutputs();
   }
 
   function savePasteForLink() {
     const t = (pasteText || "").trim();
-    if (t.length < 40) {
-      setSourceWarning("Para garantir precisão, cole um trecho maior (pelo menos algumas linhas).");
+    if (t.length < 60) {
+      setErrorMsg("Cole um trecho maior (pelo menos algumas linhas) pra garantir precisão.");
       return;
     }
 
-    setSources((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), type: "text", value: t, relatedTo: pendingLinkId || null },
-    ]);
-
+    setSources((prev) => [...prev, { id: crypto.randomUUID(), type: "text", value: t, relatedTo: pendingLinkId }]);
     setNeedsPaste(false);
     setPendingLinkId(null);
     setPasteText("");
-    setSourceWarning("");
+    setErrorMsg("");
+    resetAIOutputs();
   }
 
   function cancelPaste() {
     setNeedsPaste(false);
     setPendingLinkId(null);
     setPasteText("");
-    setSourceWarning("");
   }
 
-  function removeSource(id) {
-    setSources((prev) => prev.filter((s) => s.id !== id));
-    if (id === pendingLinkId) cancelPaste();
-  }
-
-  function resetFlowKeepInputs() {
-    setApiError("");
-    setPlan(null);
-    setSelectedOptionId("");
-    setCustomDirection("");
-    setGenerated(null);
-    setStage("form");
-  }
-
-  // Monta payload para o backend
-  function buildBasePayload() {
+  function buildPayloadBase() {
     return {
       topic: topic.trim(),
-      audience: "", // por enquanto vazio (sem mexer em UX ainda)
-      ctaDesired: "", // por enquanto vazio
+      audience: "(não informado)",
+      ctaDesired: "(não informado)",
       platform,
       format,
       characteristic,
-      sources: (sources || []).map((s) => ({ type: s.type, value: s.value })),
+      sources: sources.map((s) => ({ type: s.type, value: s.value })),
     };
   }
 
-  // Chamada PLAN
   async function handlePlan() {
     if (!topic.trim()) return;
 
-    // Se o user acabou de adicionar um link e ainda tá no paste: segura a onda
+    // se tá pedindo paste ainda, trava aqui
     if (needsPaste) {
-      setApiError("Antes de continuar: cole o trecho principal da fonte (pra garantir precisão).");
+      setErrorMsg("Antes de continuar: cole o trecho principal da fonte (pra IA ler de verdade).");
       return;
     }
 
-    setApiError("");
-    setLoadingPlan(true);
+    setIsPlanning(true);
+    setErrorMsg("");
     setPlan(null);
+    setSelectedOptionId("");
+    setCustomDirection("");
     setGenerated(null);
 
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phase: "plan", ...buildBasePayload() }),
+        body: JSON.stringify({ phase: "plan", ...buildPayloadBase() }),
       });
 
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        // Caso especial: backend bloqueia por falta de texto legível
-        if (res.status === 422 && data?.code === "sources_need_paste") {
-          setApiError(data?.detail || "Para garantir precisão, cole o trecho principal da fonte.");
-          setLoadingPlan(false);
-          return;
-        }
-        setApiError(data?.error || "Falha ao planejar o conteúdo.");
-        setLoadingPlan(false);
+        setErrorMsg(data?.detail || data?.error || "Falha ao analisar e sugerir A/B/C.");
+        return;
+      }
+
+      // Se o backend disser que ainda não tem texto suficiente, avisa
+      if (data?.sourceReadiness?.canReliablyUseSources === false) {
+        setErrorMsg(data?.sourceReadiness?.messageToUser || "Cole o texto da fonte pra garantir precisão.");
+        setPlan(data); // ainda mostra o que deu pra entender
         return;
       }
 
       setPlan(data);
-
-      // Se o plano já avisar que precisa paste, a gente não avança
-      const canUse = data?.sourceReadiness?.canReliablyUseSources;
-      if (canUse === false) {
-        setApiError(data?.sourceReadiness?.messageToUser || "Para garantir precisão, cole o trecho principal da fonte.");
-        setStage("form");
-      } else {
-        setStage("plan_ready");
-      }
     } catch (e) {
-      setApiError(String(e?.message || e));
+      setErrorMsg(String(e?.message || e));
     } finally {
-      setLoadingPlan(false);
+      setIsPlanning(false);
     }
   }
 
-  // Chamada GENERATE
   async function handleGenerateFinal() {
-    if (!topic.trim()) return;
-
-    const hasOverride = Boolean(customDirection.trim());
+    const hasCustom = Boolean(customDirection.trim());
     const hasChoice = Boolean(selectedOptionId);
 
-    if (!hasOverride && !hasChoice) {
-      setApiError("Escolha uma opção (A/B/C) ou escreva seu direcionamento.");
+    if (!hasCustom && !hasChoice) {
+      setErrorMsg("Escolha A/B/C ou escreva seu direcionamento (override).");
       return;
     }
 
-    setApiError("");
-    setLoadingGenerate(true);
+    setIsGenerating(true);
+    setErrorMsg("");
     setGenerated(null);
-    setStage("generating");
 
     try {
       const payload = {
         phase: "generate",
-        ...buildBasePayload(),
-        ...(hasOverride ? { customDirection: customDirection.trim() } : {}),
-        ...(!hasOverride ? { selectedOptionId } : {}),
+        ...buildPayloadBase(),
+        ...(hasCustom ? { customDirection: customDirection.trim() } : { selectedOptionId }),
       };
 
       const res = await fetch("/api/generate", {
@@ -402,25 +385,15 @@ export default function CryptoContentAgent() {
       const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        if (res.status === 422 && data?.code === "sources_need_paste") {
-          setApiError(data?.detail || "Para garantir precisão, cole o trecho principal da fonte.");
-          setStage("form");
-          setLoadingGenerate(false);
-          return;
-        }
-        setApiError(data?.error || "Falha ao gerar conteúdo.");
-        setStage("plan_ready");
-        setLoadingGenerate(false);
+        setErrorMsg(data?.detail || data?.error || "Falha ao gerar conteúdo final.");
         return;
       }
 
       setGenerated(data);
-      setStage("done");
     } catch (e) {
-      setApiError(String(e?.message || e));
-      setStage("plan_ready");
+      setErrorMsg(String(e?.message || e));
     } finally {
-      setLoadingGenerate(false);
+      setIsGenerating(false);
     }
   }
 
@@ -438,7 +411,7 @@ export default function CryptoContentAgent() {
             Agente de Criação de Conteúdo
           </h1>
           <p className="text-gray-600">
-            Agente de IA para creators: criar, planejar e escalar sua produção de conteúdo.
+            IA para creators: entender suas fontes, sugerir caminhos e gerar conteúdo final.
           </p>
         </div>
 
@@ -474,10 +447,9 @@ export default function CryptoContentAgent() {
                 Criar Conteúdo
               </div>
 
-              {/* Erro amigável */}
-              {apiError ? <Notice type="warn">{apiError}</Notice> : null}
+              {errorMsg ? <Notice type="warn">{errorMsg}</Notice> : null}
 
-              {/* 1) O que quer falar? */}
+              {/* 1) Tema */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Sobre o que você quer postar?
@@ -486,68 +458,51 @@ export default function CryptoContentAgent() {
                   value={topic}
                   onChange={(e) => {
                     setTopic(e.target.value);
-                    // mexeu em input base? reseta resultado
-                    if (stage !== "form") resetFlowKeepInputs();
+                    resetAIOutputs();
                   }}
-                  placeholder="Ex: Qual a probabilidade de um token performar bem em 2026?"
+                  placeholder="Ex: Regras do cashback: como funciona e o que mudou?"
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
                 />
-                {topic?.trim() ? (
-                  <p className="text-xs text-gray-500 mt-2">
-                    Pronto pra gerar: <strong>{topic}</strong>
-                  </p>
-                ) : null}
               </div>
 
               {/* 2) Fontes */}
               <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 space-y-3">
                 <div className="flex items-center gap-2 font-semibold text-gray-800">
                   <LinkIcon size={16} className="text-purple-600" />
-                  Fontes (opcional)
+                  Fontes (links + texto colado)
                 </div>
 
                 <p className="text-xs text-gray-600">
-                  Cole um <strong>link</strong> (referência) ou um <strong>texto</strong> (fonte legível).
+                  Link sozinho vira só referência. Para a IA “absorver”, você cola o texto principal.
                 </p>
 
                 <div className="flex gap-2">
                   <input
                     value={sourceInput}
                     onChange={(e) => setSourceInput(e.target.value)}
-                    placeholder="Cole um link (thread, artigo…) OU cole um trecho em texto"
+                    placeholder="Cole um link (thread/artigo) OU cole um trecho em texto"
                     className="flex-1 px-4 py-3 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-purple-500"
                   />
                   <button
                     type="button"
-                    onClick={() => {
-                      addSource();
-                      if (stage !== "form") resetFlowKeepInputs();
-                    }}
+                    onClick={addSource}
                     className="px-4 py-3 rounded-lg font-semibold bg-white border border-gray-300 hover:bg-gray-100"
                   >
                     Adicionar
                   </button>
                 </div>
 
-                {/* Mensagem A */}
-                {sourceWarning ? <Notice type="info">{sourceWarning}</Notice> : null}
-
-                {/* Bloco paste obrigatório */}
                 {needsPaste ? (
                   <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-3">
                     <div className="text-sm font-semibold text-gray-800 flex items-center gap-2">
                       <FileText size={16} className="text-purple-600" />
-                      Cole o trecho principal da fonte
-                    </div>
-
-                    <div className="text-xs text-gray-600">
-                      Dica: pode ser a thread inteira, um trecho do artigo, ou as regras do doc.
+                      Cole o trecho principal dessa fonte
                     </div>
 
                     <textarea
                       value={pasteText}
                       onChange={(e) => setPasteText(e.target.value)}
-                      placeholder="Cole aqui o texto da fonte…"
+                      placeholder="Cole aqui o texto da fonte (thread, doc, trecho do artigo)…"
                       rows={6}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-purple-500"
                     />
@@ -555,10 +510,7 @@ export default function CryptoContentAgent() {
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={() => {
-                          savePasteForLink();
-                          if (stage !== "form") resetFlowKeepInputs();
-                        }}
+                        onClick={savePasteForLink}
                         className="px-4 py-2 rounded-lg font-semibold bg-purple-600 text-white hover:opacity-90"
                       >
                         Salvar trecho
@@ -594,10 +546,7 @@ export default function CryptoContentAgent() {
 
                         <button
                           type="button"
-                          onClick={() => {
-                            removeSource(s.id);
-                            if (stage !== "form") resetFlowKeepInputs();
-                          }}
+                          onClick={() => removeSource(s.id)}
                           className="text-gray-500 hover:text-gray-800"
                           aria-label="Remover fonte"
                         >
@@ -610,8 +559,7 @@ export default function CryptoContentAgent() {
 
                 <div className="text-[11px] text-gray-500">
                   Fontes: <strong>{sourcesCount}</strong> (links: <strong>{linksCount}</strong>, texto:{" "}
-                  <strong>{textCount}</strong>).{" "}
-                  <span className="text-gray-400">(Texto colado = precisão.)</span>
+                  <strong>{textCount}</strong>)
                 </div>
               </div>
 
@@ -619,13 +567,13 @@ export default function CryptoContentAgent() {
               <div className="grid md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Característica do post (tom / personalidade)
+                    Tom / personalidade
                   </label>
                   <select
                     value={characteristic}
                     onChange={(e) => {
                       setCharacteristic(e.target.value);
-                      if (stage !== "form") resetFlowKeepInputs();
+                      resetAIOutputs();
                     }}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white"
                   >
@@ -639,10 +587,9 @@ export default function CryptoContentAgent() {
                 </div>
 
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-sm text-gray-700">
-                  <div className="font-semibold mb-1">Como isso impacta?</div>
+                  <div className="font-semibold mb-1">O que acontece no fluxo?</div>
                   <div>
-                    O tom define o <strong>ritmo</strong>, o <strong>hook</strong> e a{" "}
-                    <strong>linguagem</strong>. Texto colado vira base factual.
+                    1) A IA lê o texto colado → 2) sugere A/B/C → 3) você escolhe → 4) gera final.
                   </div>
                 </div>
               </div>
@@ -658,7 +605,7 @@ export default function CryptoContentAgent() {
                         active={platform === p.id}
                         onClick={() => {
                           setPlatform(p.id);
-                          if (stage !== "form") resetFlowKeepInputs();
+                          resetAIOutputs();
                         }}
                         Icon={p.icon}
                       >
@@ -677,7 +624,7 @@ export default function CryptoContentAgent() {
                         active={format === f.id}
                         onClick={() => {
                           setFormat(f.id);
-                          if (stage !== "form") resetFlowKeepInputs();
+                          resetAIOutputs();
                         }}
                         Icon={MessageSquare}
                       >
@@ -691,97 +638,60 @@ export default function CryptoContentAgent() {
                 </div>
               </div>
 
-              {/* Button principal: agora é PLAN */}
+              {/* Botão 1: PLAN */}
               <button
                 onClick={handlePlan}
-                disabled={!topic.trim() || loadingPlan || loadingGenerate}
+                disabled={!topic.trim() || isPlanning || isGenerating}
                 type="button"
                 className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loadingPlan ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
-                {loadingPlan ? "Pensando no direcionamento..." : "Gerar Direcionamento (A/B/C)"}
+                {isPlanning ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
+                {isPlanning ? "Lendo fonte e pensando..." : "Analisar e sugerir A/B/C"}
               </button>
 
-              {/* TELA INTERMEDIÁRIA: PLAN */}
-              {stage === "plan_ready" && plan ? (
-                <div className="border border-gray-200 rounded-lg p-4 bg-white space-y-4">
-                  <div className="font-bold text-gray-900 text-lg flex items-center gap-2">
-                    <Sparkles className="text-purple-600" size={18} />
-                    Confirmação de direcionamento
+              {/* Tela A/B/C: só aparece depois do PLAN */}
+              {plan ? (
+                <div className="border border-gray-200 rounded-lg p-4 bg-white space-y-3">
+                  <div className="font-bold text-gray-900">
+                    ✅ Absorvi seu contexto. Agora escolha uma abordagem:
                   </div>
 
-                  {/* O que a IA entendeu */}
-                  <div className="grid md:grid-cols-2 gap-3">
-                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm">
-                      <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
-                        O que eu entendi
-                      </div>
-                      <div className="space-y-2 text-gray-800">
-                        <div><strong>Tema:</strong> {plan?.whatIGot?.topicUnderstanding}</div>
-                        <div><strong>Público:</strong> {plan?.whatIGot?.audienceUnderstanding}</div>
-                        <div><strong>CTA:</strong> {plan?.whatIGot?.ctaUnderstanding}</div>
-                        <div><strong>Tom:</strong> {plan?.whatIGot?.toneUnderstanding}</div>
-                        <div><strong>Plataforma:</strong> {plan?.whatIGot?.platformUnderstanding}</div>
-                        <div><strong>Formato:</strong> {plan?.whatIGot?.formatUnderstanding}</div>
-                      </div>
-                    </div>
+                  <div className="text-xs text-gray-600">
+                    {plan?.sourceReadiness?.messageToUser || ""}
+                  </div>
 
-                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm">
-                      <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
-                        Status das fontes
-                      </div>
-                      <div className="text-gray-800">
-                        {plan?.sourceReadiness?.messageToUser || "Ok."}
-                      </div>
-                      {plan?.sourceReadiness?.canReliablyUseSources === false ? (
-                        <div className="mt-2">
-                          <Notice type="warn">Para garantir precisão, cole o trecho principal da fonte.</Notice>
+                  <div className="grid md:grid-cols-3 gap-3">
+                    {(plan?.editorialOptions || []).map((opt) => (
+                      <button
+                        key={opt.optionId}
+                        type="button"
+                        onClick={() => {
+                          setSelectedOptionId(opt.optionId);
+                          setCustomDirection("");
+                          setErrorMsg("");
+                        }}
+                        className={[
+                          "text-left rounded-lg border-2 p-4 transition",
+                          selectedOptionId === opt.optionId
+                            ? "border-purple-600 bg-purple-50"
+                            : "border-gray-200 bg-white hover:border-gray-300",
+                        ].join(" ")}
+                      >
+                        <div className="font-bold text-gray-900">
+                          {opt.optionId}) {opt.label}
                         </div>
-                      ) : null}
-                    </div>
+                        <div className="text-xs text-gray-600 mt-2 space-y-1">
+                          <div><strong>Ângulo:</strong> {opt.editorialAngle}</div>
+                          <div><strong>Foco:</strong> {opt.focus}</div>
+                          <div><strong>Tom:</strong> {opt.tone}</div>
+                          <div><strong>Fontes:</strong> {opt.howSourcesAreUsed}</div>
+                          <div><strong>CTA:</strong> {opt.ctaSuggestion}</div>
+                        </div>
+                      </button>
+                    ))}
                   </div>
 
-                  {/* Opções A/B/C */}
-                  <div className="space-y-2">
-                    <div className="text-sm font-semibold text-gray-800">
-                      Escolha um caminho editorial:
-                    </div>
-
-                    <div className="grid md:grid-cols-3 gap-3">
-                      {(plan?.editorialOptions || []).map((opt) => (
-                        <button
-                          key={opt.optionId}
-                          type="button"
-                          onClick={() => {
-                            setSelectedOptionId(opt.optionId);
-                            setCustomDirection("");
-                            setApiError("");
-                          }}
-                          className={[
-                            "text-left rounded-lg border-2 p-4 transition",
-                            selectedOptionId === opt.optionId
-                              ? "border-purple-600 bg-purple-50"
-                              : "border-gray-200 bg-white hover:border-gray-300",
-                          ].join(" ")}
-                        >
-                          <div className="font-bold text-gray-900">
-                            {opt.optionId}) {opt.label}
-                          </div>
-                          <div className="text-xs text-gray-600 mt-2 space-y-1">
-                            <div><strong>Ângulo:</strong> {opt.editorialAngle}</div>
-                            <div><strong>Foco:</strong> {opt.focus}</div>
-                            <div><strong>Tom:</strong> {opt.tone}</div>
-                            <div><strong>Fontes:</strong> {opt.howSourcesAreUsed}</div>
-                            <div><strong>Reação:</strong> {opt.expectedReaction}</div>
-                            <div><strong>CTA:</strong> {opt.ctaSuggestion}</div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Override manual */}
-                  <div className="space-y-2">
+                  <div className="pt-2">
                     <div className="text-sm font-semibold text-gray-800">
                       Ou escreva seu próprio direcionamento (override):
                     </div>
@@ -792,38 +702,23 @@ export default function CryptoContentAgent() {
                         if (e.target.value.trim()) setSelectedOptionId("");
                       }}
                       rows={4}
-                      placeholder="Ex: Quero tom investigativo, citando conflitos entre fontes, com hook forte e CTA pra comentar..."
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-purple-500"
+                      placeholder="Ex: Quero tom investigativo, conectando conflitos entre fontes, com hook forte e CTA pra comentar..."
+                      className="w-full mt-2 px-4 py-3 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-purple-500"
                     />
-                    <div className="text-[11px] text-gray-500">
-                      Se você escrever aqui, isso substitui A/B/C.
+                    <div className="text-[11px] text-gray-500 mt-1">
+                      Se você escrever aqui, substitui A/B/C.
                     </div>
                   </div>
 
-                  {/* Botão final */}
+                  {/* Botão 2: GENERATE */}
                   <button
                     type="button"
                     onClick={handleGenerateFinal}
-                    disabled={loadingGenerate || (!customDirection.trim() && !selectedOptionId)}
-                    className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isGenerating || (!customDirection.trim() && !selectedOptionId)}
+                    className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:opacity-90 disabled:opacity-50"
                   >
-                    {loadingGenerate ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
-                    {loadingGenerate ? "Gerando conteúdo final..." : "Gerar Conteúdo Final"}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStage("form");
-                      setPlan(null);
-                      setSelectedOptionId("");
-                      setCustomDirection("");
-                      setGenerated(null);
-                      setApiError("");
-                    }}
-                    className="w-full px-4 py-3 rounded-lg font-semibold bg-white border border-gray-300 hover:bg-gray-100"
-                  >
-                    Voltar e ajustar inputs
+                    {isGenerating ? <Loader2 className="animate-spin" size={18} /> : <Sparkles size={18} />}
+                    {isGenerating ? "Gerando conteúdo final..." : "Gerar Conteúdo Final"}
                   </button>
                 </div>
               ) : null}
@@ -832,7 +727,7 @@ export default function CryptoContentAgent() {
             {/* Resultado */}
             {generated && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Preview mock (ainda mock, mas ok por enquanto) */}
+                {/* Preview mock */}
                 <div className="bg-white rounded-lg shadow-lg overflow-hidden">
                   <div className="p-4 border-b">
                     <div className="font-semibold">Preview (mock)</div>
@@ -867,12 +762,7 @@ export default function CryptoContentAgent() {
                     <div>
                       <div className="font-bold text-lg">📄 Conteúdo gerado</div>
                       <div className="text-xs text-gray-500">
-                        Tom: <strong>{characteristicObj?.label}</strong>{" "}
-                        {sources.length > 0 ? (
-                          <>
-                            • Base: <strong>{sources.length}</strong> fonte(s)
-                          </>
-                        ) : null}
+                        Tom: <strong>{characteristicObj?.label}</strong>
                       </div>
                     </div>
                     <CopyButton text={copyPayload} />
