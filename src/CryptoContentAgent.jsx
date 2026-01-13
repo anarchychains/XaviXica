@@ -12,6 +12,7 @@ import {
   Settings,
   Link as LinkIcon,
   X,
+  FileText,
 } from "lucide-react";
 import { storage } from "./lib/storage";
 
@@ -56,9 +57,20 @@ const FORMATS_BY_PLATFORM = {
 function mockGenerate({ topic, platform, format, characteristic, sources }) {
   const title = `O que você precisa saber sobre ${topic}`;
 
+  const readableTexts = (sources || [])
+    .filter((s) => s.type === "text")
+    .map((s) => (s.value || "").slice(0, 90).replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  const links = (sources || []).filter((s) => s.type === "link").map((s) => s.value);
+
   const sourcesLine =
     sources?.length > 0
-      ? `\n\n(Fontes de base: ${sources.map((s) => s.url).join(" | ")})`
+      ? `\n\n(Fontes: ${
+          links.length ? `links(${links.length})` : ""
+        }${links.length && readableTexts.length ? " | " : ""}${
+          readableTexts.length ? `texto(${readableTexts.length})` : ""
+        })`
       : "";
 
   const copy =
@@ -147,9 +159,15 @@ export default function CryptoContentAgent() {
   const [format, setFormat] = useState("feed");
   const [characteristic, setCharacteristic] = useState("educational");
 
-  // 🔗 Fontes (links)
+  // 🔗 Fontes (agora suportam link e texto)
   const [sourceInput, setSourceInput] = useState("");
-  const [sources, setSources] = useState([]); // [{ id, url }]
+  const [sources, setSources] = useState([]); // [{ id, type: "link"|"text", value, relatedTo? }]
+
+  // UI do copy/paste obrigatório (opção 1)
+  const [needsPaste, setNeedsPaste] = useState(false);
+  const [pendingLinkId, setPendingLinkId] = useState(null);
+  const [pasteText, setPasteText] = useState("");
+  const [sourceWarning, setSourceWarning] = useState("");
 
   const [generated, setGenerated] = useState(null);
 
@@ -198,6 +216,10 @@ export default function CryptoContentAgent() {
     return [generated.title, generated.copy, tags].filter(Boolean).join("\n\n");
   }, [generated]);
 
+  function isUrl(s) {
+    return /^https?:\/\/\S+/i.test((s || "").trim()) || /^[a-z0-9.-]+\.[a-z]{2,}\/\S+/i.test((s || "").trim());
+  }
+
   function normalizeUrl(input) {
     const raw = (input || "").trim();
     if (!raw) return "";
@@ -207,28 +229,88 @@ export default function CryptoContentAgent() {
   }
 
   function addSource() {
-    const url = normalizeUrl(sourceInput);
-    if (!url) return;
+    const raw = (sourceInput || "").trim();
+    if (!raw) return;
 
-    // evita duplicado
-    if (sources.some((s) => s.url === url)) {
+    // Se parece link, normaliza como URL e pede paste
+    if (isUrl(raw)) {
+      const url = normalizeUrl(raw);
+
+      // evita duplicado (link)
+      const exists = sources.some((s) => s.type === "link" && s.value === url);
+      if (exists) {
+        setSourceInput("");
+        return;
+      }
+
+      const linkId = crypto.randomUUID();
+      setSources((prev) => [...prev, { id: linkId, type: "link", value: url }]);
+
+      // 🔥 regra do produto (opção A)
+      setNeedsPaste(true);
+      setPendingLinkId(linkId);
+      setSourceWarning("Para garantir precisão, cole o trecho principal da fonte.");
+      setPasteText("");
+
       setSourceInput("");
       return;
     }
 
-    setSources((prev) => [...prev, { id: crypto.randomUUID(), url }]);
+    // Caso não seja link: trata como texto-base direto
+    const textValue = raw;
+    setSources((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), type: "text", value: textValue },
+    ]);
     setSourceInput("");
+    setSourceWarning("");
+  }
+
+  function savePasteForLink() {
+    const t = (pasteText || "").trim();
+
+    // mínimo pra não virar “uma linha solta”
+    if (t.length < 40) {
+      setSourceWarning("Para garantir precisão, cole um trecho maior (pelo menos algumas linhas).");
+      return;
+    }
+
+    // salva o texto legível e relaciona com o link (optional, mas ajuda no futuro)
+    setSources((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), type: "text", value: t, relatedTo: pendingLinkId || null },
+    ]);
+
+    setNeedsPaste(false);
+    setPendingLinkId(null);
+    setPasteText("");
+    setSourceWarning("");
+  }
+
+  function cancelPaste() {
+    setNeedsPaste(false);
+    setPendingLinkId(null);
+    setPasteText("");
+    setSourceWarning("");
   }
 
   function removeSource(id) {
     setSources((prev) => prev.filter((s) => s.id !== id));
+    // se apagar o link que estava pendente, fecha a UI de paste
+    if (id === pendingLinkId) cancelPaste();
   }
 
   function handleGenerate() {
     if (!topic.trim()) return;
+
+    // (por enquanto demo) — depois a gente troca pelo fluxo PLAN/GENERATE com a OpenAI
     const content = mockGenerate({ topic, platform, format, characteristic, sources });
     setGenerated(content);
   }
+
+  const sourcesCount = sources.length;
+  const linksCount = sources.filter((s) => s.type === "link").length;
+  const textCount = sources.filter((s) => s.type === "text").length;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 p-6">
@@ -302,14 +384,14 @@ export default function CryptoContentAgent() {
                 </div>
 
                 <p className="text-xs text-gray-600">
-                  Adicione links que sirvam de base ou inspiração. Seu conteúdo, suas regras.
+                  Cole um <strong>link</strong> (referência) ou um <strong>texto</strong> (fonte legível).
                 </p>
 
                 <div className="flex gap-2">
                   <input
                     value={sourceInput}
                     onChange={(e) => setSourceInput(e.target.value)}
-                    placeholder="Cole um link (thread, artigo, vídeo, post…)"
+                    placeholder="Cole um link (thread, artigo…) OU cole um trecho em texto"
                     className="flex-1 px-4 py-3 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-purple-500"
                   />
                   <button
@@ -321,15 +403,69 @@ export default function CryptoContentAgent() {
                   </button>
                 </div>
 
-                {sources.length > 0 ? (
+                {/* Mensagem A (produto) */}
+                {sourceWarning ? (
+                  <div className="text-xs text-purple-700 bg-purple-50 border border-purple-200 rounded-lg p-3 flex items-start gap-2">
+                    <Sparkles size={16} className="mt-[2px]" />
+                    <div>{sourceWarning}</div>
+                  </div>
+                ) : null}
+
+                {/* Bloco de paste obrigatório quando o usuário adiciona link */}
+                {needsPaste ? (
+                  <div className="bg-white border border-gray-200 rounded-lg p-4 space-y-3">
+                    <div className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                      <FileText size={16} className="text-purple-600" />
+                      Cole o trecho principal da fonte
+                    </div>
+
+                    <div className="text-xs text-gray-600">
+                      Dica: pode ser a thread inteira, um trecho do artigo, ou as regras do doc.
+                    </div>
+
+                    <textarea
+                      value={pasteText}
+                      onChange={(e) => setPasteText(e.target.value)}
+                      placeholder="Cole aqui o texto da fonte…"
+                      rows={6}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-purple-500"
+                    />
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={savePasteForLink}
+                        className="px-4 py-2 rounded-lg font-semibold bg-purple-600 text-white hover:opacity-90"
+                      >
+                        Salvar trecho
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelPaste}
+                        className="px-4 py-2 rounded-lg font-semibold bg-white border border-gray-300 hover:bg-gray-100"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {sourcesCount > 0 ? (
                   <div className="flex flex-wrap gap-2 pt-1">
                     {sources.map((s) => (
                       <div
                         key={s.id}
                         className="flex items-center gap-2 bg-white border border-gray-200 rounded-full px-3 py-1 text-xs"
-                        title={s.url}
+                        title={s.type === "link" ? s.value : (s.value || "").slice(0, 180)}
                       >
-                        <span className="max-w-[260px] truncate">{s.url}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full border">
+                          {s.type === "link" ? "link" : "texto"}
+                        </span>
+
+                        <span className="max-w-[260px] truncate">
+                          {s.type === "link" ? s.value : (s.value || "").replace(/\s+/g, " ").trim()}
+                        </span>
+
                         <button
                           type="button"
                           onClick={() => removeSource(s.id)}
@@ -344,8 +480,12 @@ export default function CryptoContentAgent() {
                 ) : null}
 
                 <div className="text-[11px] text-gray-500">
-                  A IA vai usar essas fontes como referência de <strong>tom</strong> e{" "}
-                  <strong>contexto</strong>.
+                  Fontes adicionadas:{" "}
+                  <strong>{sourcesCount}</strong> (links: <strong>{linksCount}</strong>, texto:{" "}
+                  <strong>{textCount}</strong>).{" "}
+                  <span className="text-gray-400">
+                    (Texto colado = precisão. Link sozinho = referência.)
+                  </span>
                 </div>
               </div>
 
@@ -373,7 +513,7 @@ export default function CryptoContentAgent() {
                   <div className="font-semibold mb-1">Como isso impacta?</div>
                   <div>
                     O tom define o <strong>ritmo</strong>, o <strong>tipo de hook</strong> e a{" "}
-                    <strong>linguagem</strong>. Fontes entram como base/contexto, não como regra.
+                    <strong>linguagem</strong>. <strong>Texto colado</strong> vira base factual.
                   </div>
                 </div>
               </div>
@@ -469,10 +609,10 @@ export default function CryptoContentAgent() {
                       <div className="font-bold text-lg">📄 Conteúdo gerado</div>
                       <div className="text-xs text-gray-500">
                         Tom: <strong>{characteristicObj?.label}</strong>
-                        {sources.length > 0 ? (
+                        {sourcesCount > 0 ? (
                           <>
                             {" "}
-                            • Base: <strong>{sources.length}</strong> fonte(s)
+                            • Base: <strong>{sourcesCount}</strong> fonte(s)
                           </>
                         ) : null}
                       </div>
