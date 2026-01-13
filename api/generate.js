@@ -34,21 +34,18 @@ function normalizeSources(sources) {
 function sourcesToText(sources) {
   const arr = normalizeSources(sources);
   if (!arr.length) return "Sem fontes.";
-  return arr
-    .map((s) => `${s.id}. (${s.type}) ${s.value}`)
-    .join("\n");
+  return arr.map((s) => `${s.id}. (${s.type}) ${s.value}`).join("\n");
 }
 
 function hasReadableSourceText(sources) {
   const arr = normalizeSources(sources);
-  // Consideramos "legível" se existir pelo menos uma fonte do tipo text com conteúdo.
-  return arr.some((s) => s.type === "text" && String(s.value).trim().length >= 40);
+  return arr.some((s) => s.type === "text" && String(s.value).trim().length >= 60);
 }
 
 function hasOnlyLinksOrTinyText(sources) {
   const arr = normalizeSources(sources);
   if (!arr.length) return false;
-  const hasText = arr.some((s) => s.type === "text" && String(s.value).trim().length >= 40);
+  const hasText = arr.some((s) => s.type === "text" && String(s.value).trim().length >= 60);
   const hasLinks = arr.some((s) => s.type === "link");
   return hasLinks && !hasText;
 }
@@ -328,11 +325,10 @@ SINAL DO SISTEMA:
 - canReliablyUseSources = ${canReliablyUseSources ? "true" : "false"}
 
 Regras importantes:
-- Se canReliablyUseSources = false, diga ao usuário: "Para garantir precisão, cole o trecho principal da fonte."
 - NUNCA invente conteúdo específico de links.
 - Mesmo sem fontes legíveis, você pode sugerir 3 caminhos editoriais com base no tema, plataforma, formato, público e tom.
 - As 3 opções devem ser bem diferentes entre si.
-- As opções devem deixar claro COMO as fontes seriam usadas quando estiverem legíveis (ou que precisam de texto colado).
+- Diga claramente como as fontes seriam usadas se estivessem em texto (ou peça pra colar texto).
 `.trim();
 
   return { system, user };
@@ -372,7 +368,10 @@ FORMATO: ${format}
 TOM/PERFIL: ${characteristic}
 
 PÚBLICO-ALVO: ${String(audience || "").trim() || "(não informado)"}
-CTA DESEJADO: ${String(ctaDesired || "").trim() || "(não informado — proponha um CTA apropriado)"}
+CTA DESEJADO: ${
+    String(ctaDesired || "").trim() ||
+    "(não informado — proponha um CTA apropriado)"
+  }
 
 ${directionBlock}
 
@@ -413,8 +412,8 @@ export default async function handler(req, res) {
       characteristic = "educational",
       sources = [],
       selectedOptionId, // "A" | "B" | "C"
-      selectedOptionText, // opcional: texto da opção (se vc quiser mandar do front)
-      customDirection, // opcional: override manual
+      selectedOptionText,
+      customDirection,
     } = body || {};
 
     const safeTopic = String(topic || "").trim();
@@ -433,7 +432,6 @@ export default async function handler(req, res) {
 
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-    // Fonte legível: consideramos legível se existir um texto colado minimamente longo
     const sourcesProvided = normalizeSources(sources).length > 0;
     const canReliablyUseSources = sourcesProvided ? hasReadableSourceText(sources) : true;
 
@@ -449,7 +447,7 @@ export default async function handler(req, res) {
             missing.push({
               sourceId: s.id,
               reason: "Fonte em link não está legível para análise precisa.",
-              whatToPaste: "Para garantir precisão, cole o trecho principal da fonte.",
+              whatToPaste: "Cole aqui o trecho principal da fonte (texto).",
             });
           }
         }
@@ -500,8 +498,6 @@ export default async function handler(req, res) {
         });
       }
 
-      // Enriquecimento do retorno com informações calculadas no servidor
-      // (não quebra schema do LLM porque isso acontece depois da validação)
       parsed.sourceReadiness = parsed.sourceReadiness || {};
       parsed.sourceReadiness.sourcesProvided = Boolean(sourcesProvided);
       parsed.sourceReadiness.canReliablyUseSources = Boolean(canReliablyUseSources);
@@ -515,20 +511,17 @@ export default async function handler(req, res) {
 
     // ========== FASE 2: GENERATE ==========
     if (phase === "generate") {
-      // Se o usuário quer precisão via fonte, mas só mandou link, a gente bloqueia.
-      // (Você pode flexibilizar depois, mas isso protege o MVP editorial.)
       if (sourcesProvided && !canReliablyUseSources) {
         return res.status(422).json({
           error: "Fonte não legível para análise precisa.",
           code: "sources_need_paste",
-          detail: "Para garantir precisão, cole o trecho principal da fonte.",
+          detail: "Para garantir precisão, cole o trecho principal da fonte (texto).",
           traceId,
         });
       }
 
       const contentSchema = getContentSchema();
 
-      // Monta o direcionamento selecionado
       let selectedOption = "";
       if (selectedOptionText && String(selectedOptionText).trim()) {
         selectedOption = String(selectedOptionText).trim();
@@ -536,9 +529,10 @@ export default async function handler(req, res) {
         selectedOption = `Opção ${selectedOptionId}`;
       }
 
-      // Regras: precisa escolher opção OU mandar override
       const hasOverride = Boolean(String(customDirection || "").trim());
-      const hasChoice = Boolean(String(selectedOptionId || "").trim() || String(selectedOptionText || "").trim());
+      const hasChoice = Boolean(
+        String(selectedOptionId || "").trim() || String(selectedOptionText || "").trim()
+      );
 
       if (!hasOverride && !hasChoice) {
         return res.status(400).json({
@@ -597,7 +591,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ ...parsed, traceId });
     }
 
-    // fase desconhecida
     return res.status(400).json({
       error: "phase inválida. Use 'plan' ou 'generate'.",
       code: "invalid_phase",
